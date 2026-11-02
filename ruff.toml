@@ -18,6 +18,7 @@ select = [
 ignore = [
     "B008",  # do not perform function calls in argument defaults (needed for FastAPI Depends)
     "W191",  # indentation contains tabs
+    "RUF001", # ambiguous unicode characters (intentional in normalizer)
 ]
 
 [lint.isort]

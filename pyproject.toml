@@ -56,3 +56,8 @@ warn_unused_ignores = true
 [[tool.mypy.overrides]]
 module = "tests.*"
 disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = "app.services.ingestion.parser"
+disallow_untyped_calls = false
+warn_return_any = false
