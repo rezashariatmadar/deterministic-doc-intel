@@ -41,38 +41,40 @@ async def test_document_and_chunk_lifecycle(db_session):
         vec1 = [1.0] * half + [0.0] * (dim - half)
         vec2 = [0.0] * half + [1.0] * (dim - half)
 
-        chunks = await chunk_repo.bulk_create([
-            ChunkCreate(
-                document_id=doc.id,
-                chunk_index=0,
-                raw_text="Data Center revenue rose 217% to $47.5B in fiscal 2024.",
-                contextualized_text=(
-                    "[Doc: NVIDIA 10-K | Section: Item 7 | Page: 45] Data Center revenue rose 217%."
+        chunks = await chunk_repo.bulk_create(
+            [
+                ChunkCreate(
+                    document_id=doc.id,
+                    chunk_index=0,
+                    raw_text="Data Center revenue rose 217% to $47.5B in fiscal 2024.",
+                    contextualized_text=(
+                        "[Doc: NVIDIA 10-K | Section: Item 7] Data Center rose 217%."
+                    ),
+                    token_count=18,
+                    page_start=45,
+                    page_end=45,
+                    section_path="Item 7. MD&A > Financial Results",
+                    element_type="prose",
+                    embedding_model=settings.EMBEDDING_MODEL,
+                    embedding=vec1,
                 ),
-                token_count=18,
-                page_start=45,
-                page_end=45,
-                section_path="Item 7. MD&A > Financial Results",
-                element_type="prose",
-                embedding_model=settings.EMBEDDING_MODEL,
-                embedding=vec1,
-            ),
-            ChunkCreate(
-                document_id=doc.id,
-                chunk_index=1,
-                raw_text="Gaming revenue was $10.4B, up 15% due to GeForce RTX 40 Series.",
-                contextualized_text=(
-                    "[Doc: NVIDIA 10-K | Section: Item 7 | Page: 46] Gaming revenue was $10.4B."
+                ChunkCreate(
+                    document_id=doc.id,
+                    chunk_index=1,
+                    raw_text="Gaming revenue was $10.4B, up 15% due to GeForce RTX 40 Series.",
+                    contextualized_text=(
+                        "[Doc: NVIDIA 10-K | Section: Item 7 | Page: 46] Gaming revenue was $10.4B."
+                    ),
+                    token_count=16,
+                    page_start=46,
+                    page_end=46,
+                    section_path="Item 7. MD&A > Gaming",
+                    element_type="prose",
+                    embedding_model=settings.EMBEDDING_MODEL,
+                    embedding=vec2,
                 ),
-                token_count=16,
-                page_start=46,
-                page_end=46,
-                section_path="Item 7. MD&A > Gaming",
-                element_type="prose",
-                embedding_model=settings.EMBEDDING_MODEL,
-                embedding=vec2,
-            ),
-        ])
+            ]
+        )
         assert len(chunks) == 2
 
         # 4. Search by similarity (cosine distance)
