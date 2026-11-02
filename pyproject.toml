@@ -1,0 +1,54 @@
+[project]
+name = "rag"
+version = "0.1.0"
+description = "Production-Grade Hybrid & Agentic RAG Platform"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "pydantic-settings>=2.6.0",
+    "pydantic>=2.9.0",
+    "sqlalchemy[asyncio]>=2.0.35",
+    "asyncpg>=0.30.0",
+    "alembic>=1.13.3",
+    "pgvector>=0.3.5",
+    "redis>=5.1.0",
+    "pymupdf>=1.24.11",
+    "pdfplumber>=0.11.4",
+    "tiktoken>=0.8.0",
+    "httpx>=0.27.2",
+    "python-multipart>=0.0.12",
+    "openai>=1.50.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.3",
+    "pytest-asyncio>=0.24.0",
+    "respx>=0.21.1",
+    "ruff>=0.7.0",
+    "mypy>=1.13.0",
+]
+local = [
+    "sentence-transformers>=3.2.0",
+    "torch>=2.4.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+warn_unused_ignores = true
