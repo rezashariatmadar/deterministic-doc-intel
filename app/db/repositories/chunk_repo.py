@@ -4,6 +4,7 @@ from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.db.models.chunk import DocumentChunk
 from app.db.models.document import Document
@@ -48,6 +49,9 @@ class ChunkRepository:
         threshold: float = 0.35,
         document_id: UUID | None = None,
         category: str | None = None,
+        element_types: list[str] | None = None,
+        page_min: int | None = None,
+        page_max: int | None = None,
     ) -> list[tuple[DocumentChunk, float]]:
         """
         Execute cosine similarity search over pgvector HNSW index.
@@ -57,7 +61,7 @@ class ChunkRepository:
         cosine_distance = DocumentChunk.embedding.cosine_distance(query_vector)
         similarity_score = (1.0 - cosine_distance).label("similarity_score")
 
-        stmt = select(DocumentChunk, similarity_score)
+        stmt = select(DocumentChunk, similarity_score).options(selectinload(DocumentChunk.document))
 
         if category:
             stmt = stmt.join(Document, DocumentChunk.document_id == Document.id).where(
@@ -66,6 +70,15 @@ class ChunkRepository:
 
         if document_id:
             stmt = stmt.where(DocumentChunk.document_id == document_id)
+
+        if element_types:
+            stmt = stmt.where(DocumentChunk.element_type.in_(element_types))
+
+        if page_min is not None:
+            stmt = stmt.where(DocumentChunk.page_start >= page_min)
+
+        if page_max is not None:
+            stmt = stmt.where(DocumentChunk.page_end <= page_max)
 
         # Filter by similarity threshold floor
         stmt = stmt.where(similarity_score >= threshold)
