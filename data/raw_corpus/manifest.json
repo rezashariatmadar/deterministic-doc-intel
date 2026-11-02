@@ -1,0 +1,19 @@
+{
+  "domain": "SEC Financial Filings (10-K / 10-Q)",
+  "description": "Curated enterprise financial documents with multi-column balance sheets and segment disclosures.",
+  "documents": [
+    {
+      "filename": "nvidia_10k_sample.pdf",
+      "sha256": "87bbc56c26a2489ead845613dce13c0d02368a929415436fc55a8f1b924ef2c7",
+      "title": "NVIDIA Corporation 2024 Form 10-K Annual Report",
+      "total_pages": 3,
+      "category": "financial_report",
+      "challenging_elements": [
+        "Multi-column ASCII/Unicode tabular layout on Page 2 and Page 3",
+        "Dense numerical financial metrics across fiscal years 2022-2024",
+        "Repeating page headers and footers with page numbering",
+        "Footnote disclosures directly tied to segment revenue rows"
+      ]
+    }
+  ]
+}
