@@ -56,6 +56,29 @@ class DocumentParsingError(AppException):
         self.page_number = page_number
 
 
+class IngestionError(AppException):
+    """Raised when an ingestion pipeline step fails."""
+
+    status_code: int = 422
+    error_code: str = "INGESTION_ERROR"
+
+    def __init__(
+        self,
+        message: str,
+        filename: str | None = None,
+        page_number: int | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        details = details or {}
+        if filename:
+            details["filename"] = filename
+        if page_number is not None:
+            details["page_number"] = page_number
+        super().__init__(message=message, details=details)
+        self.filename = filename
+        self.page_number = page_number
+
+
 class DuplicateDocumentError(AppException):
     """Raised when an uploaded document has already been indexed."""
 

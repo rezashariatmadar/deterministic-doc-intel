@@ -18,7 +18,7 @@ def test_clean_text_normalizes_whitespace() -> None:
 def test_clean_text_normalizes_unicode_quotes() -> None:
     dirty = "“NVIDIA’s Hopper” — ‘Next Gen’"
     cleaned = clean_text(dirty)
-    assert cleaned == '"NVIDIA\'s Hopper" - \'Next Gen\''
+    assert cleaned == "\"NVIDIA's Hopper\" - 'Next Gen'"
 
 
 def test_normalize_table_cell() -> None:

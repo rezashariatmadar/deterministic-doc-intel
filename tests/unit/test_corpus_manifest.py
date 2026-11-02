@@ -22,4 +22,3 @@ def test_corpus_manifest_validity() -> None:
         assert "total_pages" in doc
         assert "challenging_elements" in doc
         assert len(doc["challenging_elements"]) >= 1
-

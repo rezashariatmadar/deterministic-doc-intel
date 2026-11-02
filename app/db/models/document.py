@@ -69,4 +69,3 @@ class Document(Base):
         cascade="all, delete-orphan",
         order_by="DocumentChunk.chunk_index",
     )
-

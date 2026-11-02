@@ -46,12 +46,7 @@ class DocumentRepository:
 
     async def list_all(self, skip: int = 0, limit: int = 20) -> list[Document]:
         """Fetch paginated list of documents."""
-        stmt = (
-            select(Document)
-            .order_by(Document.created_at.desc())
-            .offset(skip)
-            .limit(limit)
-        )
+        stmt = select(Document).order_by(Document.created_at.desc()).offset(skip).limit(limit)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 

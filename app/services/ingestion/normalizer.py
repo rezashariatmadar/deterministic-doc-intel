@@ -51,8 +51,7 @@ def clean_text(text: str) -> str:
 
     # 5. Normalize whitespace: reduce multiple horizontal spaces, keep paragraph spacing
     cleaned = "\n".join(
-        HORIZONTAL_WHITESPACE_REGEX.sub(" ", line).strip()
-        for line in cleaned.splitlines()
+        HORIZONTAL_WHITESPACE_REGEX.sub(" ", line).strip() for line in cleaned.splitlines()
     )
 
     # 6. Reduce more than 2 consecutive newlines to double newline

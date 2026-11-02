@@ -1,6 +1,9 @@
 """Async database session management using SQLAlchemy and asyncpg."""
 
+import os
+import sys
 from collections.abc import AsyncGenerator
+from typing import Any
 
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -8,17 +11,32 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
 
 settings = get_settings()
 
+is_testing = (
+    "pytest" in sys.modules
+    or bool(os.environ.get("PYTEST_CURRENT_TEST"))
+    or settings.APP_ENV == "test"
+)
+
+engine_kwargs: dict[str, Any] = {
+    "echo": settings.DEBUG,
+}
+
+if is_testing:
+    engine_kwargs["poolclass"] = NullPool
+else:
+    engine_kwargs["pool_pre_ping"] = True
+    engine_kwargs["pool_size"] = 10
+    engine_kwargs["max_overflow"] = 20
+
 engine: AsyncEngine = create_async_engine(
     settings.DATABASE_URL,
-    echo=settings.DEBUG,
-    pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
+    **engine_kwargs,
 )
 
 async_session_maker = async_sessionmaker(
