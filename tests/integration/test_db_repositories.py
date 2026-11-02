@@ -1,0 +1,90 @@
+"""Integration tests for Document and Chunk repositories with pgvector."""
+
+import uuid
+
+import pytest
+
+from app.core.config import get_settings
+from app.db.repositories.chunk_repo import ChunkRepository
+from app.db.repositories.document_repo import DocumentRepository
+from app.schemas.document import ChunkCreate, DocumentCreate
+
+
+@pytest.mark.asyncio
+async def test_document_and_chunk_lifecycle(db_session):
+    settings = get_settings()
+    doc_repo = DocumentRepository(db_session)
+    chunk_repo = ChunkRepository(db_session)
+
+    # 1. Create document with unique hash for test isolation
+    unique_hash = (uuid.uuid4().hex + uuid.uuid4().hex)[:64]
+    doc = await doc_repo.create(
+        DocumentCreate(
+            filename="test_nvidia_10k.pdf",
+            file_hash=unique_hash,
+            title="NVIDIA 10-K Report 2024",
+            total_pages=2,
+        )
+    )
+    assert doc.id is not None
+    assert doc.status == "PENDING"
+
+    try:
+        # 2. Verify hash lookup (idempotency check)
+        existing = await doc_repo.get_by_hash(unique_hash)
+        assert existing is not None
+        assert existing.id == doc.id
+
+        # 3. Create distinct embedding vectors with different directions
+        dim = settings.EMBEDDING_DIMENSION
+        half = dim // 2
+        vec1 = [1.0] * half + [0.0] * (dim - half)
+        vec2 = [0.0] * half + [1.0] * (dim - half)
+
+        chunks = await chunk_repo.bulk_create([
+            ChunkCreate(
+                document_id=doc.id,
+                chunk_index=0,
+                raw_text="Data Center revenue rose 217% to $47.5B in fiscal 2024.",
+                contextualized_text=(
+                    "[Doc: NVIDIA 10-K | Section: Item 7 | Page: 45] Data Center revenue rose 217%."
+                ),
+                token_count=18,
+                page_start=45,
+                page_end=45,
+                section_path="Item 7. MD&A > Financial Results",
+                element_type="prose",
+                embedding_model=settings.EMBEDDING_MODEL,
+                embedding=vec1,
+            ),
+            ChunkCreate(
+                document_id=doc.id,
+                chunk_index=1,
+                raw_text="Gaming revenue was $10.4B, up 15% due to GeForce RTX 40 Series.",
+                contextualized_text=(
+                    "[Doc: NVIDIA 10-K | Section: Item 7 | Page: 46] Gaming revenue was $10.4B."
+                ),
+                token_count=16,
+                page_start=46,
+                page_end=46,
+                section_path="Item 7. MD&A > Gaming",
+                element_type="prose",
+                embedding_model=settings.EMBEDDING_MODEL,
+                embedding=vec2,
+            ),
+        ])
+        assert len(chunks) == 2
+
+        # 4. Search by similarity (cosine distance)
+        # Query vector points in the same direction as vec1
+        query_vec = [1.0] * half + [0.0] * (dim - half)
+        results = await chunk_repo.search_similar(query_vector=query_vec, top_k=5, threshold=0.35)
+        assert len(results) >= 1
+        top_chunk, score = results[0]
+        assert top_chunk.id == chunks[0].id
+        assert score >= 0.35
+    finally:
+        # 5. Clean up
+        await doc_repo.delete(doc.id)
+        deleted = await doc_repo.get_by_id(doc.id)
+        assert deleted is None

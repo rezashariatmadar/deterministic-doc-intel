@@ -1,0 +1,78 @@
+"""Repository pattern for DocumentChunk database and pgvector search operations."""
+
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models.chunk import DocumentChunk
+from app.db.models.document import Document
+from app.schemas.document import ChunkCreate
+
+
+class ChunkRepository:
+    """Encapsulates database operations for document chunks and vector similarity search."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def bulk_create(self, chunks_in: list[ChunkCreate]) -> list[DocumentChunk]:
+        """Atomically insert a batch of chunks into PostgreSQL."""
+        records = [
+            DocumentChunk(
+                document_id=c.document_id,
+                chunk_index=c.chunk_index,
+                raw_text=c.raw_text,
+                contextualized_text=c.contextualized_text,
+                token_count=c.token_count,
+                page_start=c.page_start,
+                page_end=c.page_end,
+                section_path=c.section_path,
+                element_type=c.element_type,
+                embedding_model=c.embedding_model,
+                embedding=c.embedding,
+                chunk_metadata=c.metadata,
+            )
+            for c in chunks_in
+        ]
+        self.session.add_all(records)
+        await self.session.commit()
+        for r in records:
+            await self.session.refresh(r)
+        return records
+
+    async def search_similar(
+        self,
+        query_vector: list[float],
+        top_k: int = 5,
+        threshold: float = 0.35,
+        document_id: UUID | None = None,
+        category: str | None = None,
+    ) -> list[tuple[DocumentChunk, float]]:
+        """
+        Execute cosine similarity search over pgvector HNSW index.
+        Returns list of tuples: (DocumentChunk, similarity_score) sorted descending by similarity.
+        Cosine similarity = 1.0 - cosine_distance.
+        """
+        cosine_distance = DocumentChunk.embedding.cosine_distance(query_vector)
+        similarity_score = (1.0 - cosine_distance).label("similarity_score")
+
+        stmt = select(DocumentChunk, similarity_score)
+
+        if category:
+            stmt = stmt.join(Document, DocumentChunk.document_id == Document.id).where(
+                Document.category == category
+            )
+
+        if document_id:
+            stmt = stmt.where(DocumentChunk.document_id == document_id)
+
+        # Filter by similarity threshold floor
+        stmt = stmt.where(similarity_score >= threshold)
+
+        # Order by closest distance (highest similarity first)
+        stmt = stmt.order_by(cosine_distance.asc()).limit(top_k)
+
+        result = await self.session.execute(stmt)
+        rows = result.all()
+        return [(row[0], float(row[1])) for row in rows]

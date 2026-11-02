@@ -1,0 +1,59 @@
+"""Document and chunk Pydantic schemas (DTOs)."""
+
+from datetime import datetime
+from typing import Any
+from uuid import UUID
+
+from pydantic import BaseModel, Field
+
+
+class DocumentBase(BaseModel):
+    filename: str = Field(..., max_length=255)
+    title: str | None = Field(default=None, max_length=255)
+    source_type: str = Field(default="pdf", max_length=50)
+    category: str | None = Field(default=None, max_length=50)
+    extra_metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class DocumentCreate(DocumentBase):
+    file_hash: str = Field(..., min_length=64, max_length=64)
+    total_pages: int = Field(default=0, ge=0)
+
+
+class DocumentRead(DocumentBase):
+    id: UUID
+    file_hash: str
+    total_pages: int
+    total_chunks: int
+    status: str
+    error_message: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ChunkBase(BaseModel):
+    chunk_index: int = Field(..., ge=0)
+    raw_text: str = Field(..., min_length=1)
+    contextualized_text: str = Field(..., min_length=1)
+    token_count: int = Field(..., gt=0)
+    page_start: int = Field(..., ge=1)
+    page_end: int = Field(..., ge=1)
+    section_path: str = Field(..., min_length=1)
+    element_type: str = Field(default="prose", max_length=30)
+    embedding_model: str = Field(..., max_length=100)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ChunkCreate(ChunkBase):
+    document_id: UUID
+    embedding: list[float]
+
+
+class ChunkRead(ChunkBase):
+    id: UUID
+    document_id: UUID
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
