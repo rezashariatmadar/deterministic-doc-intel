@@ -35,8 +35,16 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
-# Superpowers & Scratch
+# Agent Tooling, Plans & Roadmap Specifications
+docs/
+.agents/
+.claude/
 .superpowers/
+skills-lock.json
+Production-Grade Hybrid & Agentic RAG Engineering Roadmap.md
+*Roadmap*.md
+
+# Scratch
 scratch/
 
 # IDE & OS
