@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import AsyncGenerator
+from typing import Any
 
 import httpx
 
@@ -160,3 +161,137 @@ class OpenAILLMProvider(LLMProvider):
                             yield delta_content
                     except json.JSONDecodeError:
                         continue
+
+
+class GeminiEmbeddingProvider(EmbeddingProvider):
+    """Google Gemini embeddings client supporting gemini-embedding models."""
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model_name: str = "gemini-embedding-001",
+        dimension: int = 1024,
+        base_url: str = "https://generativelanguage.googleapis.com/v1beta",
+        timeout: float = 30.0,
+    ) -> None:
+        if not api_key:
+            raise ConfigurationError("Gemini API key must be provided via settings or argument.")
+        super().__init__(model_name=model_name, dimension=dimension)
+        self.api_key = api_key
+        self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
+
+    async def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+
+        clean_model = self.model_name.removeprefix("models/")
+        requests = [
+            {
+                "model": f"models/{clean_model}",
+                "content": {"parts": [{"text": t}]},
+                "outputDimensionality": self.dimension,
+            }
+            for t in texts
+        ]
+
+        url = f"{self.base_url}/models/{clean_model}:batchEmbedContents"
+        params = {"key": self.api_key}
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.post(url, params=params, json={"requests": requests})
+            response.raise_for_status()
+            data = response.json()
+
+        return [item["values"] for item in data.get("embeddings", [])]
+
+    async def embed_query(self, query: str) -> list[float]:
+        results = await self.embed_texts([query])
+        return results[0]
+
+
+class GeminiLLMProvider(LLMProvider):
+    """Google Gemini LLM client supporting gemini models with streaming."""
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model_name: str = "gemini-3.5-flash",
+        base_url: str = "https://generativelanguage.googleapis.com/v1beta",
+        timeout: float = 60.0,
+    ) -> None:
+        if not api_key:
+            raise ConfigurationError("Gemini API key must be provided via settings or argument.")
+        super().__init__(model_name=model_name)
+        self.api_key = api_key
+        self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
+
+    async def generate(
+        self,
+        prompt: str,
+        system_prompt: str | None = None,
+        temperature: float = 0.0,
+    ) -> str:
+        clean_model = self.model_name.removeprefix("models/")
+        url = f"{self.base_url}/models/{clean_model}:generateContent"
+        params = {"key": self.api_key}
+
+        payload: dict[str, Any] = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": temperature},
+        }
+        if system_prompt:
+            payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.post(url, params=params, json=payload)
+            response.raise_for_status()
+            data = response.json()
+
+        candidates = data.get("candidates", [])
+        if not candidates:
+            return ""
+        parts = candidates[0].get("content", {}).get("parts", [])
+        return "".join(p.get("text", "") for p in parts)
+
+    async def generate_stream(
+        self,
+        prompt: str,
+        system_prompt: str | None = None,
+        temperature: float = 0.0,
+    ) -> AsyncGenerator[str, None]:
+        clean_model = self.model_name.removeprefix("models/")
+        url = f"{self.base_url}/models/{clean_model}:streamGenerateContent"
+        params = {"key": self.api_key, "alt": "sse"}
+
+        payload: dict[str, Any] = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": temperature},
+        }
+        if system_prompt:
+            payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
+
+        async with (
+            httpx.AsyncClient(timeout=self.timeout) as client,
+            client.stream("POST", url, params=params, json=payload) as response,
+        ):
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                clean_line = line.strip()
+                if not clean_line or clean_line.startswith(":"):
+                    continue
+                if clean_line.startswith("data: "):
+                    data_part = clean_line[6:].strip()
+                    try:
+                        chunk_data = json.loads(data_part)
+                        candidates = chunk_data.get("candidates", [])
+                        if candidates:
+                            parts = candidates[0].get("content", {}).get("parts", [])
+                            for p in parts:
+                                text_piece = p.get("text")
+                                if text_piece:
+                                    yield text_piece
+                    except json.JSONDecodeError:
+                        continue
+

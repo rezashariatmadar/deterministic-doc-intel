@@ -4,6 +4,8 @@ from app.core.config import get_settings
 from app.core.exceptions import ConfigurationError
 from app.services.providers.base import EmbeddingProvider, LLMProvider
 from app.services.providers.cloud_provider import (
+    GeminiEmbeddingProvider,
+    GeminiLLMProvider,
     OpenAIEmbeddingProvider,
     OpenAILLMProvider,
 )
@@ -26,8 +28,12 @@ def get_embedding_provider(
     dim = dimension or settings.EMBEDDING_DIMENSION
 
     if ptype == "gemini":
-        raise ConfigurationError(
-            "Gemini provider is not yet installed. Please use 'openai' or 'local'."
+        key = api_key or settings.GEMINI_API_KEY
+        mname = model_name or settings.GEMINI_EMBEDDING_MODEL
+        return GeminiEmbeddingProvider(
+            api_key=key,
+            model_name=mname,
+            dimension=dim,
         )
 
     if ptype == "openai":
@@ -49,7 +55,7 @@ def get_embedding_provider(
         )
 
     raise ConfigurationError(
-        f"Unsupported embedding provider '{ptype}'. Allowed options: 'openai', 'local'."
+        f"Unsupported embedding provider '{ptype}'. Allowed options: 'gemini', 'openai', 'local'."
     )
 
 
@@ -64,8 +70,11 @@ def get_llm_provider(
     ptype = (provider_type or settings.LLM_PROVIDER).lower()
 
     if ptype == "gemini":
-        raise ConfigurationError(
-            "Gemini provider is not yet installed. Please use 'openai' or 'local'."
+        key = api_key or settings.GEMINI_API_KEY
+        mname = model_name or settings.GEMINI_LLM_MODEL
+        return GeminiLLMProvider(
+            api_key=key,
+            model_name=mname,
         )
 
     if ptype == "openai":
@@ -85,5 +94,5 @@ def get_llm_provider(
         )
 
     raise ConfigurationError(
-        f"Unsupported LLM provider '{ptype}'. Allowed options: 'openai', 'local'."
+        f"Unsupported LLM provider '{ptype}'. Allowed options: 'gemini', 'openai', 'local'."
     )
