@@ -91,6 +91,32 @@ class GroundedGenerator:
 
             claim_text = claim_text.strip(" \t\r\n,;:-")
 
+            # If claim_text is purely an introductory phrase, inspect text following citation
+            intro_phrases = {
+                "according to",
+                "as reported in",
+                "as stated in",
+                "as noted in",
+                "as reported by",
+                "as described in",
+                "per",
+                "based on",
+            }
+            if claim_text.lower() in intro_phrases:
+                following = raw_answer[m.end() : next_start]
+                boundaries = [0]
+                for bm in re.finditer(r"[\r\n]+|(?<!\d)(?<=[.!?])\s+", following):
+                    boundaries.append(bm.end())
+                boundaries.append(len(following))
+                sents = [
+                    following[boundaries[k] : boundaries[k + 1]].strip()
+                    for k in range(len(boundaries) - 1)
+                ]
+                sents = [s for s in sents if s]
+                claim_text = sents[0] if sents else following.strip()
+
+            claim_text = claim_text.strip(" \t\r\n,;:-")
+
             # Fallback when claim_text is empty (e.g. clustered [1][2], [1], [2], or leading [1])
             if not claim_text:
                 if i > 0:
@@ -186,6 +212,8 @@ class GroundedGenerator:
             last_idx = m.end()
         parts.append(raw_answer[last_idx:])
         verified_answer = "".join(parts)
+        # Collapse duplicate adjacent brackets after rehoming
+        verified_answer = re.sub(r"\[(\d+)\](?:\s*\[\1\])+", r"[\1]", verified_answer)
         return verified_answer, citations
 
     def calculate_confidence(

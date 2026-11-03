@@ -35,7 +35,7 @@ def make_chunk(
 def test_normalize_for_matching_strips_punct_quotes_dashes_and_folds_case() -> None:
     dirty = "  “NVIDIA’s Revenue” — was $18.1B, up 206%!  "
     norm = normalize_for_matching(dirty)
-    assert norm == "nvidia s revenue was 18 1b up 206"
+    assert norm == "nvidia s revenue was $18 1b up 206%"
 
 
 def test_normalize_for_matching_empty_and_whitespace() -> None:
@@ -299,3 +299,61 @@ def test_fuzzy_match_latency_on_large_candidate_pool() -> None:
     assert res.is_verified is False
     assert res.match_tier is None
     assert dt_ms < 5.0, f"Verification exceeded 5ms limit: took {dt_ms:.2f}ms"
+
+
+def test_preserve_quantitative_symbols_in_normalized_and_sliced_haystack() -> None:
+    haystack = (
+        "The global enterprise division earned €50M, £20M in UK, "
+        "¥500M in Japan, and $100M total (30%)."
+    )
+    chunk = make_chunk(source_id=1, text=haystack)
+    verifier = QuoteVerifier()
+
+    # Slice containing $ and %
+    res = verifier.verify_citation("earned €50M and $100M total (30%)", chunk, [chunk])
+    assert res.is_verified is True
+    assert "$" in res.verified_quote if res.verified_quote else False
+    assert "%" in res.verified_quote if res.verified_quote else False
+
+    # Financial slice with €
+    res_euro = verifier.verify_citation("division earned €50M", chunk, [chunk])
+    assert res_euro.is_verified is True
+    assert res_euro.verified_quote == "division earned €50M"
+
+    # Financial slice with £
+    res_pound = verifier.verify_citation("£20M in UK", chunk, [chunk])
+    assert res_pound.is_verified is True
+    assert res_pound.verified_quote == "£20M in UK"
+
+    # Financial slice with ¥
+    res_yen = verifier.verify_citation("¥500M in Japan", chunk, [chunk])
+    assert res_yen.is_verified is True
+    assert res_yen.verified_quote == "¥500M in Japan"
+
+
+def test_fuzzy_match_number_verification_rejects_hallucinated_numbers() -> None:
+    chunk = make_chunk(
+        source_id=1,
+        text=(
+            "Operating margin expanded substantially to thirty percent across all core "
+            "business sectors in fiscal 2024."
+        ),
+    )
+    verifier = QuoteVerifier()
+
+    # Claim has number 2025 instead of 2024 (high token overlap but number mismatch)
+    claim_wrong_year = (
+        "Operating margin expanded substantially to thirty percent across all core "
+        "business sectors in fiscal 2025."
+    )
+    res = verifier.verify_citation(claim_wrong_year, chunk, [chunk])
+    assert res.is_verified is False
+
+    # Claim with matching number 2024 (minor word typo)
+    claim_correct_year = (
+        "Operating margin expanded notably to thirty percent across all core "
+        "business sectors in fiscal 2024."
+    )
+    res2 = verifier.verify_citation(claim_correct_year, chunk, [chunk])
+    assert res2.is_verified is True
+    assert res2.match_tier == "fuzzy"

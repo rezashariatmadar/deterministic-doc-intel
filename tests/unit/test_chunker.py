@@ -100,3 +100,42 @@ def test_chunker_transfers_bbox_metadata(sample_pdf_path: Path) -> None:
     assert len(chunks) > 0
     assert "bbox" in chunks[0].metadata
     assert all(k in chunks[0].metadata["bbox"] for k in ("x0", "y0", "x1", "y1"))
+
+
+def test_chunker_multipage_prose_stores_per_page_bboxes() -> None:
+    el1 = StructuralElement(
+        element_type="prose",
+        text="This is sentence one on page one of a multi-page section.",
+        page_number=1,
+        metadata={"bbox": {"x0": 50.0, "y0": 100.0, "x1": 200.0, "y1": 150.0}, "block_index": 1},
+    )
+    el2 = StructuralElement(
+        element_type="prose",
+        text="This is continuation sentence two on page two of the section.",
+        page_number=2,
+        metadata={"bbox": {"x0": 60.0, "y0": 80.0, "x1": 220.0, "y1": 140.0}, "block_index": 2},
+    )
+    doc = ParsedDocument(title="Multi-page Doc", total_pages=2, elements=[el1, el2])
+    chunker = DocumentChunker(target_tokens=500)
+    chunks = chunker.chunk_document(doc)
+
+    assert len(chunks) == 1
+    chunk = chunks[0]
+    assert chunk.page_start == 1
+    assert chunk.page_end == 2
+    assert "bboxes" in chunk.metadata
+    assert len(chunk.metadata["bboxes"]) == 2
+    assert chunk.metadata["bboxes"][0]["page"] == 1
+    assert chunk.metadata["bboxes"][0]["bbox"] == {
+        "x0": 50.0,
+        "y0": 100.0,
+        "x1": 200.0,
+        "y1": 150.0,
+    }
+    assert chunk.metadata["bboxes"][1]["page"] == 2
+    assert chunk.metadata["bboxes"][1]["bbox"] == {
+        "x0": 60.0,
+        "y0": 80.0,
+        "x1": 220.0,
+        "y1": 140.0,
+    }

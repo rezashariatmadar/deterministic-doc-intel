@@ -180,18 +180,25 @@ class DocumentChunker:
         """Merge bounding boxes and block provenance from accumulated structural elements."""
         merged: dict[str, Any] = {}
         bboxes: list[dict[str, float]] = []
+        page_bboxes: dict[int, list[dict[str, float]]] = {}
         block_indices: list[int] = []
+
+        pages = [el.page_number for el in elements if el.page_number is not None]
+        page_start = min(pages) if pages else 1
+        page_end = max(pages) if pages else 1
+        is_multipage = page_start != page_end
 
         for el in elements:
             if not el.metadata:
                 continue
             for k, v in el.metadata.items():
-                if k not in ("bbox", "block_index", "block_indices"):
+                if k not in ("bbox", "bboxes", "block_index", "block_indices"):
                     merged[k] = v
             if "bbox" in el.metadata and isinstance(el.metadata["bbox"], dict):
                 b = el.metadata["bbox"]
                 if all(coord in b for coord in ("x0", "y0", "x1", "y1")):
                     bboxes.append(b)
+                    page_bboxes.setdefault(el.page_number, []).append(b)
             if (
                 "block_index" in el.metadata
                 and isinstance(el.metadata["block_index"], int)
@@ -207,6 +214,21 @@ class DocumentChunker:
                 "y1": round(max(float(b["y1"]) for b in bboxes), 2),
             }
 
+        # If elements span across multiple pages, store per-page bounding boxes
+        if (is_multipage or len(page_bboxes) > 1) and page_bboxes:
+            merged["bboxes"] = [
+                {
+                    "page": p,
+                    "bbox": {
+                        "x0": round(min(float(b["x0"]) for b in p_boxes), 2),
+                        "y0": round(min(float(b["y0"]) for b in p_boxes), 2),
+                        "x1": round(max(float(b["x1"]) for b in p_boxes), 2),
+                        "y1": round(max(float(b["y1"]) for b in p_boxes), 2),
+                    },
+                }
+                for p, p_boxes in sorted(page_bboxes.items())
+            ]
+
         if block_indices:
             merged["block_index"] = block_indices[0]
             if len(block_indices) > 1:
@@ -215,12 +237,21 @@ class DocumentChunker:
         return merged
 
     def _copy_metadata(self, metadata: dict[str, Any] | None) -> dict[str, Any]:
-        """Deep copy metadata dictionary with bbox."""
+        """Deep copy metadata dictionary with bbox and bboxes."""
         if not metadata:
             return {}
         copied = dict(metadata)
         if "bbox" in copied and isinstance(copied["bbox"], dict):
             copied["bbox"] = dict(copied["bbox"])
+        if "bboxes" in copied and isinstance(copied["bboxes"], list):
+            copied["bboxes"] = [
+                {
+                    "page": b["page"],
+                    "bbox": dict(b["bbox"]) if isinstance(b.get("bbox"), dict) else {},
+                }
+                for b in copied["bboxes"]
+                if isinstance(b, dict) and "page" in b
+            ]
         return copied
 
     def _flush_prose_buffer(

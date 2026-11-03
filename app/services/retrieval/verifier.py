@@ -11,6 +11,9 @@ from app.schemas.query import RetrievedChunk
 # Punctuation and quotation mark characters to strip/normalize
 _EXTRA_PUNCTUATION = {"—", "–", "−", "…", "“", "”", "‘", "’", "«", "»"}
 
+# Quantitative and currency symbols to preserve during normalization
+_QUANTITATIVE_SYMBOLS = {"$", "%", "€", "£", "¥"}
+
 # Hyphenated word split across line breaks (e.g. "oper-\nating" -> "operating")
 _HYPHEN_LINEBREAK_REGEX = re.compile(r"-\s*[\r\n]+\s*")
 
@@ -46,9 +49,12 @@ def normalize_with_mapping(text: str) -> tuple[str, list[int]]:
         norm_chars = unicodedata.normalize("NFKC", char)
         for nc in norm_chars:
             is_punct = (
-                nc in string.punctuation
-                or unicodedata.category(nc).startswith("P")
-                or nc in _EXTRA_PUNCTUATION
+                nc not in _QUANTITATIVE_SYMBOLS
+                and (
+                    nc in string.punctuation
+                    or unicodedata.category(nc).startswith("P")
+                    or nc in _EXTRA_PUNCTUATION
+                )
             )
             if is_punct or nc.isspace():
                 if not in_whitespace and chars:
@@ -131,11 +137,6 @@ class QuoteVerifier:
         if not norm_quote:
             return None
 
-        # Fast pre-filter: if text does not contain any of quote's leading words, skip mapping
-        q_tokens = norm_quote.split()
-        if q_tokens and not any(t in text.lower() for t in q_tokens[:3]):
-            return None
-
         norm_text, char_map = normalize_with_mapping(text)
         if not norm_text or not char_map:
             return None
@@ -157,6 +158,11 @@ class QuoteVerifier:
         """Bounded fuzzy match using difflib.SequenceMatcher across sliding windows."""
         clean_quote = quote.strip()
         if len(clean_quote) < 15 or not text.strip():
+            return None
+
+        # Verify numbers present in quote: require that they appear in the candidate text
+        quote_numbers = set(re.findall(r"\b\d+(?:\.\d+)?%?\b", clean_quote))
+        if quote_numbers and not all(n in text for n in quote_numbers):
             return None
 
         quote_lower = clean_quote.lower()
@@ -191,7 +197,9 @@ class QuoteVerifier:
         for i in range(len(sent_spans)):
             start, _, s_text, s_lower, s_set, overlap = sent_spans[i]
             # Pre-filter using token overlap to prevent unnecessary SequenceMatcher calls
-            if overlap / max(q_len, 1) >= 0.35:
+            if overlap / max(q_len, 1) >= 0.35 and (
+                not quote_numbers or all(n in s_text for n in quote_numbers)
+            ):
                 r = difflib.SequenceMatcher(None, quote_lower, s_lower).ratio()
                 if r > best_ratio:
                     best_ratio = r
@@ -202,19 +210,31 @@ class QuoteVerifier:
                 pair_overlap = len(q_set & (s_set | next_set))
                 if pair_overlap / max(q_len, 1) >= 0.35:
                     pair_text = text[start:next_end].strip()
-                    r = difflib.SequenceMatcher(None, quote_lower, pair_text.lower()).ratio()
-                    if r > best_ratio:
-                        best_ratio = r
-                        best_slice = pair_text
+                    if not quote_numbers or all(n in pair_text for n in quote_numbers):
+                        r = difflib.SequenceMatcher(None, quote_lower, pair_text.lower()).ratio()
+                        if r > best_ratio:
+                            best_ratio = r
+                            best_slice = pair_text
 
         # Early return after Step 1 sentence check
-        if best_ratio >= threshold and best_slice:
+        if (
+            best_ratio >= threshold
+            and best_slice
+            and (not quote_numbers or all(n in best_slice for n in quote_numbers))
+        ):
             return self._clean_boundary(best_slice, clean_quote)
 
-        # Step 2: Phrase sliding window within sentences having high token overlap
-        for _, _, s_text, _, _, overlap in sent_spans:
-            if overlap / max(q_len, 1) < 0.4:
-                continue
+        # Step 2: Phrase sliding window only on the top 1 candidate sentence by token overlap
+        candidate_spans = [
+            span
+            for span in sent_spans
+            if span[5] / max(q_len, 1) >= 0.4
+            and (not quote_numbers or all(n in span[2] for n in quote_numbers))
+        ]
+        if candidate_spans:
+            candidate_spans.sort(key=lambda s: s[5], reverse=True)
+            top_span = candidate_spans[0]
+            s_text = top_span[2]
 
             # Pre-tokenize sentence into word match objects once
             w_matches = list(re.finditer(r"\S+", s_text))
@@ -227,12 +247,18 @@ class QuoteVerifier:
                     c_start = w_matches[i].start()
                     c_end = w_matches[i + w - 1].end()
                     cand = s_text[c_start:c_end].strip()
+                    if quote_numbers and not all(n in cand for n in quote_numbers):
+                        continue
                     r = difflib.SequenceMatcher(None, quote_lower, cand.lower()).ratio()
                     if r > best_ratio:
                         best_ratio = r
                         best_slice = cand
 
-        if best_ratio >= threshold and best_slice:
+        if (
+            best_ratio >= threshold
+            and best_slice
+            and (not quote_numbers or all(n in best_slice for n in quote_numbers))
+        ):
             return self._clean_boundary(best_slice, clean_quote)
 
         return None

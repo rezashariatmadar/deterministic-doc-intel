@@ -252,3 +252,47 @@ def test_citation_verification_clustered_and_punctuation_separated_citations() -
     assert {c.source_id for c in cits_3} == {1, 2}
 
 
+def test_citation_verification_introductory_phrases(
+    sample_chunks: list[RetrievedChunk],
+) -> None:
+    generator = GroundedGenerator(llm_provider=None)
+
+    # 1. "According to [1],"
+    raw_1 = "According to [1], Data Center revenue rose 217% to $47.5B in fiscal 2024."
+    ans_1, cits_1 = generator.verify_and_extract_citations(raw_1, sample_chunks)
+    assert "[1]" in ans_1
+    assert len(cits_1) == 1
+    assert cits_1[0].source_id == 1
+    assert cits_1[0].quote == "Data Center revenue rose 217% to $47.5B in fiscal 2024."
+
+    # 2. "As reported in [1],"
+    raw_2 = "As reported in [1], Data Center revenue rose 217% to $47.5B in fiscal 2024."
+    ans_2, cits_2 = generator.verify_and_extract_citations(raw_2, sample_chunks)
+    assert "[1]" in ans_2
+    assert len(cits_2) == 1
+    assert cits_2[0].source_id == 1
+
+    # 3. "Per [1],"
+    raw_3 = "Per [1], Data Center revenue rose 217% to $47.5B in fiscal 2024."
+    ans_3, cits_3 = generator.verify_and_extract_citations(raw_3, sample_chunks)
+    assert "[1]" in ans_3
+    assert len(cits_3) == 1
+    assert cits_3[0].source_id == 1
+
+
+def test_citation_verification_collapses_adjacent_duplicate_brackets(
+    sample_chunks: list[RetrievedChunk],
+) -> None:
+    generator = GroundedGenerator(llm_provider=None)
+    # Both [1] and [2] refer to the same fact that is only in chunk 1, so [2] gets rehomed to [1]
+    raw_answer = "Data Center revenue rose 217% to $47.5B in fiscal 2024 [1] [2]."
+    ans, cits = generator.verify_and_extract_citations(raw_answer, sample_chunks)
+
+    # Rehoming [2] to [1] produces adjacent [1] [1], which must collapse to [1]
+    assert "[1]" in ans
+    assert "[1] [1]" not in ans
+    assert "[1][1]" not in ans
+    assert len(cits) == 1
+    assert cits[0].source_id == 1
+
+
