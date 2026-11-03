@@ -26,10 +26,11 @@ class VectorSearchService:
         query: str,
         filters: QueryFilters | None = None,
         top_k: int = 5,
+        max_tokens: int | None = None,
     ) -> list[RetrievedChunk]:
         """
         Embed the user query and retrieve top-k semantically relevant chunks
-        passing all metadata pre-filters and minimum similarity threshold.
+        passing all metadata pre-filters, minimum similarity threshold, and token budget.
         """
         if not query.strip():
             return []
@@ -61,9 +62,23 @@ class VectorSearchService:
             page_max=page_max,
         )
 
-        # 4. Map to enriched RetrievedChunk schemas with 1-based source indices
+        # 4. Map to enriched RetrievedChunk schemas enforcing context token budget
         results: list[RetrievedChunk] = []
-        for idx, (chunk, score) in enumerate(matched_chunks, start=1):
+        token_ceiling = (
+            max_tokens if max_tokens is not None else self.settings.MAX_CONTEXT_TOKENS
+        )
+        accumulated_tokens = 0
+
+        for chunk, score in matched_chunks:
+            chunk_tokens = chunk.token_count or 0
+            if accumulated_tokens + chunk_tokens > token_ceiling:
+                if results:
+                    break
+                # If even single chunk exceeds budget, break to avoid overflow
+                break
+
+            accumulated_tokens += chunk_tokens
+            idx = len(results) + 1
             doc_title = (
                 chunk.document.title
                 if chunk.document and chunk.document.title

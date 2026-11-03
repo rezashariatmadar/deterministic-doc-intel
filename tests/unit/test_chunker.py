@@ -139,3 +139,27 @@ def test_chunker_multipage_prose_stores_per_page_bboxes() -> None:
         "x1": 220.0,
         "y1": 140.0,
     }
+
+
+def test_chunker_sliding_window_prose_overlap() -> None:
+    p1 = StructuralElement(
+        element_type="prose",
+        text="Alpha apple apricot avocado banana blueberry blackberry cantaloupe cherry.",
+        page_number=1,
+    )
+    p2 = StructuralElement(
+        element_type="prose",
+        text="Date elderberry fig grape grapefruit guava honeydew kiwi lemon lime mango.",
+        page_number=1,
+    )
+    doc = ParsedDocument(title="Doc", total_pages=1, elements=[p1, p2])
+    # Target tokens small enough to split p1 and p2 into separate chunks
+    chunker = DocumentChunker(target_tokens=15, overlap_tokens=5)
+    chunks = chunker.chunk_document(doc)
+    assert len(chunks) >= 2
+    # With sliding window overlap, trailing tokens from chunk 0 must appear in chunk 1
+    words_chunk0 = set(chunks[0].raw_text.lower().split())
+    words_chunk1 = set(chunks[1].raw_text.lower().split())
+    common = words_chunk0.intersection(words_chunk1)
+    assert len(common) > 0
+

@@ -121,5 +121,14 @@ async def test_vector_search_executes_and_filters(db_session: AsyncSession) -> N
         )
         assert len(table_results) == 0
 
+        # 3. Context window budgeting test
+        budgeted_results = await service.search(
+            query="What was Data Center revenue?",
+            filters=QueryFilters(min_similarity=0.35),
+            top_k=5,
+            max_tokens=5,  # Token limit lower than chunk's 18 tokens
+        )
+        assert len(budgeted_results) == 0
+
     finally:
         await doc_repo.delete(doc.id)

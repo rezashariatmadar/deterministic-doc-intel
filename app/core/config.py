@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     # Retrieval
     RETRIEVAL_TOP_K: int = 5
     SIMILARITY_THRESHOLD: float = 0.35
+    MAX_CONTEXT_TOKENS: int = 4000
 
     model_config = SettingsConfigDict(
         env_file=".env",

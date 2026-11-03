@@ -140,9 +140,12 @@ class DocumentChunker:
                     if chunk:
                         chunks.append(chunk)
                         chunk_idx += 1
-                    prose_buffer = []
-                    prose_pages = []
-                    prose_elements = []
+                    overlap_buf, overlap_pgs, overlap_els = self._get_overlap_tail(
+                        prose_buffer, prose_pages, prose_elements
+                    )
+                    prose_buffer = overlap_buf
+                    prose_pages = overlap_pgs
+                    prose_elements = overlap_els
 
                 # If single paragraph exceeds target tokens, split by sentences
                 if el_tokens > self.target_tokens:
@@ -156,6 +159,24 @@ class DocumentChunker:
                     )
                     chunks.extend(sentence_chunks)
                     chunk_idx += len(sentence_chunks)
+                    if sentence_chunks and self.overlap_tokens:
+                        last_c = sentence_chunks[-1]
+                        toks = self.tokenizer.encode(last_c.raw_text)
+                        ov_text = (
+                            self.tokenizer.decode(toks[-self.overlap_tokens :]).strip()
+                            if len(toks) > self.overlap_tokens
+                            else last_c.raw_text
+                        )
+                        prose_buffer = [ov_text]
+                        prose_pages = [last_c.page_end]
+                        prose_elements = [
+                            StructuralElement(
+                                element_type="prose",
+                                text=ov_text,
+                                page_number=last_c.page_end,
+                                metadata=self._copy_metadata(last_c.metadata),
+                            )
+                        ]
                 else:
                     prose_buffer.append(el.text)
                     prose_pages.append(el.page_number)
@@ -253,6 +274,45 @@ class DocumentChunker:
                 if isinstance(b, dict) and "page" in b
             ]
         return copied
+
+    def _get_overlap_tail(
+        self,
+        buffer: list[str],
+        pages: list[int],
+        elements: list[StructuralElement],
+    ) -> tuple[list[str], list[int], list[StructuralElement]]:
+        """Extract trailing tokens from buffered prose to seed sliding-window overlap."""
+        if not self.overlap_tokens or not buffer:
+            return [], [], []
+
+        full_text = " ".join(buffer).strip()
+        if not full_text:
+            return [], [], []
+
+        toks = self.tokenizer.encode(full_text)
+        if len(toks) <= self.overlap_tokens:
+            overlap_text = full_text
+        else:
+            overlap_text = self.tokenizer.decode(toks[-self.overlap_tokens :]).strip()
+
+        if not overlap_text:
+            return [], [], []
+
+        last_page = pages[-1] if pages else 1
+        last_el = (
+            elements[-1]
+            if elements
+            else StructuralElement(
+                element_type="prose", text=overlap_text, page_number=last_page
+            )
+        )
+        overlap_el = StructuralElement(
+            element_type="prose",
+            text=overlap_text,
+            page_number=last_page,
+            metadata=self._copy_metadata(last_el.metadata),
+        )
+        return [overlap_text], [last_page], [overlap_el]
 
     def _flush_prose_buffer(
         self,
@@ -435,7 +495,15 @@ class DocumentChunker:
                     )
                 )
                 curr_idx += 1
-                curr_sentences = [s_clean]
+                if self.overlap_tokens and curr_sentences:
+                    toks = self.tokenizer.encode(raw_chunk)
+                    if len(toks) > self.overlap_tokens:
+                        overlap_s = self.tokenizer.decode(toks[-self.overlap_tokens :]).strip()
+                    else:
+                        overlap_s = raw_chunk
+                    curr_sentences = [overlap_s, s_clean]
+                else:
+                    curr_sentences = [s_clean]
 
         if curr_sentences:
             raw_chunk = " ".join(curr_sentences)
