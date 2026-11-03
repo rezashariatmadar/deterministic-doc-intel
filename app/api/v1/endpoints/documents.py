@@ -120,6 +120,7 @@ async def ingest_document(
                     element_type=draft.element_type,
                     embedding_model=embedding_provider.model_name,
                     embedding=embeddings[idx],
+                    metadata=draft.metadata,
                 )
                 for idx, draft in enumerate(draft_chunks)
             ]

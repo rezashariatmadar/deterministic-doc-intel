@@ -128,6 +128,39 @@ class PDFLayoutParser:
 
         return default_title.replace("_", " ").title()
 
+    def _extract_block_metadata(self, block: Any) -> dict[str, Any]:
+        """Extract bounding box and block index from PyMuPDF block tuple."""
+        if len(block) >= 6:
+            try:
+                x0, y0, x1, y1 = (
+                    float(block[0]),
+                    float(block[1]),
+                    float(block[2]),
+                    float(block[3]),
+                )
+                block_no = int(block[5])
+                return {
+                    "bbox": {
+                        "x0": round(x0, 2),
+                        "y0": round(y0, 2),
+                        "x1": round(x1, 2),
+                        "y1": round(y1, 2),
+                    },
+                    "block_index": block_no,
+                }
+            except (ValueError, TypeError, IndexError):
+                pass
+        return {}
+
+    def _copy_metadata(self, metadata: dict[str, Any]) -> dict[str, Any]:
+        """Deep copy metadata dictionary with bbox."""
+        if not metadata:
+            return {}
+        copied = dict(metadata)
+        if "bbox" in copied and isinstance(copied["bbox"], dict):
+            copied["bbox"] = dict(copied["bbox"])
+        return copied
+
     def _process_page_blocks(
         self,
         blocks: list[Any],
@@ -146,17 +179,22 @@ class PDFLayoutParser:
             if self.REPETITIVE_HEADER_FOOTER_REGEX.match(block_text):
                 continue
 
+            block_metadata = self._extract_block_metadata(block)
+
             # 1. Detect Tables: ASCII table markers (+--- or | col |)
             if self._is_table_block(block_text):
                 table_md = self._convert_ascii_table_to_markdown(block_text)
                 if table_md:
+                    table_meta: dict[str, Any] = {"format": "markdown_table"}
+                    if block_metadata:
+                        table_meta.update(self._copy_metadata(block_metadata))
                     page_elements.append(
                         StructuralElement(
                             element_type="table",
                             text=table_md,
                             page_number=page_num,
                             heading_level=0,
-                            metadata={"format": "markdown_table"},
+                            metadata=table_meta,
                         )
                     )
                 continue
@@ -175,6 +213,7 @@ class PDFLayoutParser:
                             text=clean_text(line),
                             page_number=page_num,
                             heading_level=1,
+                            metadata=self._copy_metadata(block_metadata),
                         )
                     )
                 elif self.HEADING_H2_REGEX.match(line):
@@ -184,6 +223,7 @@ class PDFLayoutParser:
                             text=clean_text(line),
                             page_number=page_num,
                             heading_level=2,
+                            metadata=self._copy_metadata(block_metadata),
                         )
                     )
                 else:
@@ -196,6 +236,7 @@ class PDFLayoutParser:
                                 text=cleaned_line,
                                 page_number=page_num,
                                 heading_level=0,
+                                metadata=self._copy_metadata(block_metadata),
                             )
                         )
 

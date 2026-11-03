@@ -6,7 +6,7 @@ from typing import Any
 
 import tiktoken
 
-from app.services.ingestion.parser import ParsedDocument
+from app.services.ingestion.parser import ParsedDocument, StructuralElement
 
 
 @dataclass
@@ -53,6 +53,7 @@ class DocumentChunker:
         # Buffer for accumulating prose within the same section
         prose_buffer: list[str] = []
         prose_pages: list[int] = []
+        prose_elements: list[StructuralElement] = []
         current_section = "General"
 
         for el in doc.elements:
@@ -66,12 +67,14 @@ class DocumentChunker:
                         doc.title,
                         current_section,
                         chunk_idx,
+                        elements=prose_elements,
                     )
                     if chunk:
                         chunks.append(chunk)
                         chunk_idx += 1
                     prose_buffer = []
                     prose_pages = []
+                    prose_elements = []
 
                 level = el.heading_level or 1
                 heading_stack[level] = el.text
@@ -94,12 +97,14 @@ class DocumentChunker:
                         doc.title,
                         current_section,
                         chunk_idx,
+                        elements=prose_elements,
                     )
                     if chunk:
                         chunks.append(chunk)
                         chunk_idx += 1
                     prose_buffer = []
                     prose_pages = []
+                    prose_elements = []
 
                 table_chunks = self._chunk_table(
                     table_text=el.text,
@@ -107,6 +112,7 @@ class DocumentChunker:
                     section_path=current_section,
                     page_num=el.page_number,
                     start_chunk_idx=chunk_idx,
+                    metadata=el.metadata,
                 )
                 chunks.extend(table_chunks)
                 chunk_idx += len(table_chunks)
@@ -119,6 +125,7 @@ class DocumentChunker:
             if current_buffer_tokens + el_tokens <= self.target_tokens:
                 prose_buffer.append(el.text)
                 prose_pages.append(el.page_number)
+                prose_elements.append(el)
             else:
                 # Flush buffer
                 if prose_buffer:
@@ -128,12 +135,14 @@ class DocumentChunker:
                         doc.title,
                         current_section,
                         chunk_idx,
+                        elements=prose_elements,
                     )
                     if chunk:
                         chunks.append(chunk)
                         chunk_idx += 1
                     prose_buffer = []
                     prose_pages = []
+                    prose_elements = []
 
                 # If single paragraph exceeds target tokens, split by sentences
                 if el_tokens > self.target_tokens:
@@ -143,12 +152,14 @@ class DocumentChunker:
                         section_path=current_section,
                         page_num=el.page_number,
                         start_chunk_idx=chunk_idx,
+                        metadata=el.metadata,
                     )
                     chunks.extend(sentence_chunks)
                     chunk_idx += len(sentence_chunks)
                 else:
                     prose_buffer.append(el.text)
                     prose_pages.append(el.page_number)
+                    prose_elements.append(el)
 
         # Flush any remaining prose
         if prose_buffer:
@@ -158,11 +169,59 @@ class DocumentChunker:
                 doc.title,
                 current_section,
                 chunk_idx,
+                elements=prose_elements,
             )
             if chunk:
                 chunks.append(chunk)
 
         return chunks
+
+    def _merge_element_metadata(self, elements: list[StructuralElement]) -> dict[str, Any]:
+        """Merge bounding boxes and block provenance from accumulated structural elements."""
+        merged: dict[str, Any] = {}
+        bboxes: list[dict[str, float]] = []
+        block_indices: list[int] = []
+
+        for el in elements:
+            if not el.metadata:
+                continue
+            for k, v in el.metadata.items():
+                if k not in ("bbox", "block_index", "block_indices"):
+                    merged[k] = v
+            if "bbox" in el.metadata and isinstance(el.metadata["bbox"], dict):
+                b = el.metadata["bbox"]
+                if all(coord in b for coord in ("x0", "y0", "x1", "y1")):
+                    bboxes.append(b)
+            if (
+                "block_index" in el.metadata
+                and isinstance(el.metadata["block_index"], int)
+                and el.metadata["block_index"] not in block_indices
+            ):
+                block_indices.append(el.metadata["block_index"])
+
+        if bboxes:
+            merged["bbox"] = {
+                "x0": round(min(float(b["x0"]) for b in bboxes), 2),
+                "y0": round(min(float(b["y0"]) for b in bboxes), 2),
+                "x1": round(max(float(b["x1"]) for b in bboxes), 2),
+                "y1": round(max(float(b["y1"]) for b in bboxes), 2),
+            }
+
+        if block_indices:
+            merged["block_index"] = block_indices[0]
+            if len(block_indices) > 1:
+                merged["block_indices"] = block_indices
+
+        return merged
+
+    def _copy_metadata(self, metadata: dict[str, Any] | None) -> dict[str, Any]:
+        """Deep copy metadata dictionary with bbox."""
+        if not metadata:
+            return {}
+        copied = dict(metadata)
+        if "bbox" in copied and isinstance(copied["bbox"], dict):
+            copied["bbox"] = dict(copied["bbox"])
+        return copied
 
     def _flush_prose_buffer(
         self,
@@ -171,6 +230,7 @@ class DocumentChunker:
         doc_title: str,
         section_path: str,
         chunk_idx: int,
+        elements: list[StructuralElement] | None = None,
     ) -> DocumentChunkDraft | None:
         """Create a DocumentChunkDraft from buffered prose elements."""
         raw_text = "\n\n".join(buffer).strip()
@@ -183,6 +243,7 @@ class DocumentChunker:
         breadcrumb = f"[Document: {doc_title} | Section: {section_path} | Page: {page_start}]"
         contextualized_text = f"{breadcrumb} {raw_text}"
         tokens = self.count_tokens(raw_text)
+        metadata = self._merge_element_metadata(elements or [])
 
         return DocumentChunkDraft(
             chunk_index=chunk_idx,
@@ -193,6 +254,7 @@ class DocumentChunker:
             page_end=page_end,
             section_path=section_path,
             element_type="prose",
+            metadata=metadata,
         )
 
     def _chunk_table(
@@ -202,8 +264,10 @@ class DocumentChunker:
         section_path: str,
         page_num: int,
         start_chunk_idx: int,
+        metadata: dict[str, Any] | None = None,
     ) -> list[DocumentChunkDraft]:
         """Split a table while keeping headers on continuation slices."""
+        chunk_metadata = self._copy_metadata(metadata)
         lines = [line.strip() for line in table_text.splitlines() if line.strip()]
         if len(lines) < 3:
             # Small or invalid table, wrap as single chunk
@@ -219,6 +283,7 @@ class DocumentChunker:
                     page_end=page_num,
                     section_path=section_path,
                     element_type="table",
+                    metadata=self._copy_metadata(chunk_metadata),
                 )
             ]
 
@@ -241,6 +306,7 @@ class DocumentChunker:
                     page_end=page_num,
                     section_path=section_path,
                     element_type="table",
+                    metadata=self._copy_metadata(chunk_metadata),
                 )
             ]
 
@@ -271,6 +337,7 @@ class DocumentChunker:
                         page_end=page_num,
                         section_path=section_path,
                         element_type="table",
+                        metadata=self._copy_metadata(chunk_metadata),
                     )
                 )
                 curr_idx += 1
@@ -289,6 +356,7 @@ class DocumentChunker:
                     page_end=page_num,
                     section_path=section_path,
                     element_type="table",
+                    metadata=self._copy_metadata(chunk_metadata),
                 )
             )
 
@@ -301,8 +369,10 @@ class DocumentChunker:
         section_path: str,
         page_num: int,
         start_chunk_idx: int,
+        metadata: dict[str, Any] | None = None,
     ) -> list[DocumentChunkDraft]:
         """Split oversized prose text along sentence boundaries with token budgeting."""
+        chunk_metadata = self._copy_metadata(metadata)
         # Simple sentence splitter
         sentences = re.split(r"(?<=[.!?])\s+", text)
         chunks: list[DocumentChunkDraft] = []
@@ -330,6 +400,7 @@ class DocumentChunker:
                         page_end=page_num,
                         section_path=section_path,
                         element_type="prose",
+                        metadata=self._copy_metadata(chunk_metadata),
                     )
                 )
                 curr_idx += 1
@@ -348,6 +419,7 @@ class DocumentChunker:
                     page_end=page_num,
                     section_path=section_path,
                     element_type="prose",
+                    metadata=self._copy_metadata(chunk_metadata),
                 )
             )
 

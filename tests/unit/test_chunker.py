@@ -90,3 +90,13 @@ def test_chunker_on_real_pdf_fixture() -> None:
         assert c.page_end >= c.page_start
         assert c.section_path != ""
         assert c.contextualized_text.startswith("[Document:")
+
+
+def test_chunker_transfers_bbox_metadata(sample_pdf_path: Path) -> None:
+    parser = PDFLayoutParser()
+    doc = parser.parse(sample_pdf_path)
+    chunker = DocumentChunker()
+    chunks = chunker.chunk_document(doc)
+    assert len(chunks) > 0
+    assert "bbox" in chunks[0].metadata
+    assert all(k in chunks[0].metadata["bbox"] for k in ("x0", "y0", "x1", "y1"))

@@ -40,3 +40,18 @@ def test_parser_handles_empty_or_nonexistent_gracefully() -> None:
     empty_doc = parser.parse_text_blocks([], title="Empty Document", total_pages=0)
     assert empty_doc.total_pages == 0
     assert len(empty_doc.elements) == 0
+
+
+def test_parser_extracts_bbox_and_block_index(sample_pdf_path: Path) -> None:
+    parser = PDFLayoutParser()
+    doc = parser.parse(sample_pdf_path)
+    assert len(doc.elements) > 0
+    prose_elements = [el for el in doc.elements if el.element_type == "prose"]
+    assert len(prose_elements) > 0
+    first = prose_elements[0]
+    assert "bbox" in first.metadata
+    bbox = first.metadata["bbox"]
+    assert all(k in bbox for k in ("x0", "y0", "x1", "y1"))
+    assert bbox["x1"] > bbox["x0"]
+    assert "block_index" in first.metadata
+    assert isinstance(first.metadata["block_index"], int)
