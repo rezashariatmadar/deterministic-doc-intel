@@ -99,7 +99,7 @@ async def test_grounded_generation_returns_rag_response(
     sample_chunks: list[RetrievedChunk],
 ) -> None:
     llm = MockLLMProvider(
-        response_text="In fiscal 2024, Data Center revenue increased by 217% [1]."
+        response_text="Data Center revenue rose 217% to $47.5B in fiscal 2024 [1]."
     )
     generator = GroundedGenerator(llm_provider=llm)
 
@@ -108,9 +108,10 @@ async def test_grounded_generation_returns_rag_response(
         chunks=sample_chunks,
     )
 
-    assert response.answer.startswith("In fiscal 2024")
+    assert response.answer.startswith("Data Center revenue rose")
     assert len(response.citations) == 1
     assert response.citations[0].source_id == 1
+    assert response.citations[0].quote == "Data Center revenue rose 217% to $47.5B in fiscal 2024"
     assert response.confidence_score > 0.8
     assert response.latency_ms >= 0.0
     assert len(response.sources) == 2
@@ -129,3 +130,60 @@ async def test_grounded_generation_empty_chunks_returns_unanswerable() -> None:
     assert "do not contain sufficient information" in response.answer
     assert len(response.citations) == 0
     assert response.confidence_score == 0.0
+
+
+def test_citation_verification_extracts_exact_haystack_slice(
+    sample_chunks: list[RetrievedChunk],
+) -> None:
+    generator = GroundedGenerator(llm_provider=None)
+    raw_answer = "Data Center revenue rose 217% to $47.5B in fiscal 2024 [1]."
+
+    verified_answer, citations = generator.verify_and_extract_citations(raw_answer, sample_chunks)
+
+    assert "[1]" in verified_answer
+    assert len(citations) == 1
+    assert citations[0].source_id == 1
+    assert citations[0].quote == "Data Center revenue rose 217% to $47.5B in fiscal 2024"
+
+
+def test_citation_verification_rehomes_wrong_chunk(
+    sample_chunks: list[RetrievedChunk],
+) -> None:
+    generator = GroundedGenerator(llm_provider=None)
+    # LLM incorrectly cited [1] for Gaming revenue which is actually in chunk [2]
+    raw_answer = "Gaming revenue was $10.4B, an increase of 15% year-over-year [1]."
+
+    verified_answer, citations = generator.verify_and_extract_citations(raw_answer, sample_chunks)
+
+    assert "[2]" in verified_answer
+    assert "[1]" not in verified_answer
+    assert len(citations) == 1
+    assert citations[0].source_id == 2
+    assert citations[0].section_path == "Item 7 > Gaming Segment"
+    assert citations[0].page_start == 46
+    assert citations[0].quote == "Gaming revenue was $10.4B, an increase of 15% year-over-year"
+
+
+def test_citation_verification_rewrites_hallucination_to_unverified(
+    sample_chunks: list[RetrievedChunk],
+) -> None:
+    generator = GroundedGenerator(llm_provider=None)
+    # Source [1] exists, but the claim is completely fabricated
+    raw_answer = "Quantum computing revenue reached $50B in 2024 [1]."
+
+    verified_answer, citations = generator.verify_and_extract_citations(raw_answer, sample_chunks)
+
+    assert "[unverified: 1]" in verified_answer
+    assert "[1]" not in verified_answer
+    assert len(citations) == 0
+
+
+def test_generator_accepts_optional_quote_verifier(
+    sample_chunks: list[RetrievedChunk],
+) -> None:
+    from app.services.retrieval.verifier import QuoteVerifier
+
+    custom_verifier = QuoteVerifier()
+    generator = GroundedGenerator(llm_provider=None, quote_verifier=custom_verifier)
+    assert generator.quote_verifier is custom_verifier
+

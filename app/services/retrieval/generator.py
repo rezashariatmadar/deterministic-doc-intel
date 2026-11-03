@@ -6,6 +6,7 @@ from collections.abc import AsyncGenerator
 
 from app.schemas.query import Citation, RAGResponse, RetrievedChunk
 from app.services.providers.base import LLMProvider
+from app.services.retrieval.verifier import QuoteVerifier
 
 GROUNDED_SYSTEM_PROMPT = """You are an accurate, strictly factual financial analysis assistant.
 Answer the user's question using ONLY the provided sources inside <sources> XML tags.
@@ -22,8 +23,15 @@ CRITICAL GUIDELINES:
 class GroundedGenerator:
     """Orchestrates XML prompt assembly, citation verification, and confidence scoring."""
 
-    def __init__(self, llm_provider: LLMProvider | None = None) -> None:
+    def __init__(
+        self,
+        llm_provider: LLMProvider | None = None,
+        quote_verifier: QuoteVerifier | None = None,
+    ) -> None:
         self.llm_provider = llm_provider
+        self.quote_verifier = (
+            quote_verifier if quote_verifier is not None else QuoteVerifier()
+        )
 
     def build_context_xml(self, chunks: list[RetrievedChunk]) -> str:
         """Format retrieved chunks into structured XML with clear source IDs."""
@@ -45,42 +53,131 @@ class GroundedGenerator:
         self, raw_answer: str, chunks: list[RetrievedChunk]
     ) -> tuple[str, list[Citation]]:
         """
-        Verify all bracketed citations [N] against retrieved chunks.
-        Valid citations are extracted into structured Citation models.
-        Hallucinated citations are rewritten as [unverified: N].
+        Verify all bracketed citations [N] against retrieved chunks with QuoteVerifier.
+        Valid citations extract the exact slice from chunk text as Citation.quote.
+        Citations pointing to wrong chunks are automatically re-homed.
+        Hallucinated citations or ungrounded claims are rewritten as [unverified: N].
         """
+        matches = list(re.finditer(r"\[(\d+)\]", raw_answer))
+        if not matches:
+            return raw_answer, []
+
         chunk_map = {c.source_id: c for c in chunks}
         seen_source_ids: set[int] = set()
         citations: list[Citation] = []
+        replacements: list[str] = []
 
-        def replace_citation(match: re.Match[str]) -> str:
-            source_id = int(match.group(1))
-            if source_id in chunk_map:
-                if source_id not in seen_source_ids:
-                    seen_source_ids.add(source_id)
-                    chunk = chunk_map[source_id]
-                    # Extract first sentence of text as candidate quote
-                    first_sent = chunk.text.split(".")[0].strip()
-                    quote = (
-                        f"{first_sent}."
-                        if first_sent and not first_sent.endswith(".")
-                        else first_sent
+        for i, m in enumerate(matches):
+            orig_source_id = int(m.group(1))
+            prev_end = matches[i - 1].end() if i > 0 else 0
+            next_start = (
+                matches[i + 1].start() if i + 1 < len(matches) else len(raw_answer)
+            )
+
+            # Extract preceding text back to sentence/paragraph boundary
+            preceding = raw_answer[prev_end : m.start()]
+            claim_text = ""
+            if preceding.strip():
+                boundaries = [0]
+                for bm in re.finditer(r"[\r\n]+|(?<!\d)(?<=[.!?])\s+", preceding):
+                    boundaries.append(bm.end())
+                boundaries.append(len(preceding))
+                sents = [
+                    preceding[boundaries[k] : boundaries[k + 1]].strip()
+                    for k in range(len(boundaries) - 1)
+                ]
+                sents = [s for s in sents if s]
+                claim_text = sents[-1] if sents else preceding.strip()
+            else:
+                # Fallback: clustered citation [1][2] -> check text before previous citations
+                if i > 0:
+                    text_before = raw_answer[: m.start()]
+                    stripped_before = re.sub(r"(\[\d+\]\s*)+$", "", text_before)
+                    boundaries = [0]
+                    for bm in re.finditer(
+                        r"[\r\n]+|(?<!\d)(?<=[.!?])\s+", stripped_before
+                    ):
+                        boundaries.append(bm.end())
+                    boundaries.append(len(stripped_before))
+                    sents = [
+                        stripped_before[boundaries[k] : boundaries[k + 1]].strip()
+                        for k in range(len(boundaries) - 1)
+                    ]
+                    sents = [s for s in sents if s]
+                    if sents:
+                        claim_text = sents[-1]
+                # Fallback: citation at start of sentence [1] ... -> check text following citation
+                if not claim_text:
+                    following = raw_answer[m.end() : next_start]
+                    boundaries = [0]
+                    for bm in re.finditer(r"[\r\n]+|(?<!\d)(?<=[.!?])\s+", following):
+                        boundaries.append(bm.end())
+                    boundaries.append(len(following))
+                    sents = [
+                        following[boundaries[k] : boundaries[k + 1]].strip()
+                        for k in range(len(boundaries) - 1)
+                    ]
+                    sents = [s for s in sents if s]
+                    if sents:
+                        claim_text = sents[0]
+
+            claim_text = claim_text.strip(" \t\r\n,;:-")
+
+            # Check for inner quoted phrase within quotation marks
+            quote_match = re.search(r"[\"“\']([^\"”\']{3,})[\"”\']", claim_text)
+            inner_quote = quote_match.group(1).strip() if quote_match else None
+
+            if orig_source_id in chunk_map:
+                primary_chunk = chunk_map[orig_source_id]
+                res = None
+                if inner_quote:
+                    res = self.quote_verifier.verify_citation(
+                        inner_quote, primary_chunk, chunks
                     )
-                    citations.append(
-                        Citation(
-                            source_id=source_id,
-                            document_title=chunk.document_title,
-                            page_start=chunk.page_start,
-                            page_end=chunk.page_end,
-                            section_path=chunk.section_path,
-                            quote=quote if quote else None,
+                if not res or not res.is_verified:
+                    res = self.quote_verifier.verify_citation(
+                        claim_text, primary_chunk, chunks
+                    )
+            else:
+                res = None
+
+            if res is not None and res.is_verified:
+                effective_id = (
+                    res.rehomed_source_id
+                    if (
+                        res.rehomed_source_id is not None
+                        and res.rehomed_source_id != orig_source_id
+                    )
+                    else orig_source_id
+                )
+                if effective_id in chunk_map:
+                    chunk = chunk_map[effective_id]
+                    if effective_id not in seen_source_ids:
+                        seen_source_ids.add(effective_id)
+                        citations.append(
+                            Citation(
+                                source_id=effective_id,
+                                document_title=chunk.document_title,
+                                page_start=chunk.page_start,
+                                page_end=chunk.page_end,
+                                section_path=chunk.section_path,
+                                quote=res.verified_quote,
+                            )
                         )
-                    )
-                return f"[{source_id}]"
-            # Flag citation hallucinated by LLM
-            return f"[unverified: {source_id}]"
+                    replacements.append(f"[{effective_id}]")
+                else:
+                    replacements.append(f"[unverified: {orig_source_id}]")
+            else:
+                replacements.append(f"[unverified: {orig_source_id}]")
 
-        verified_answer = re.sub(r"\[(\d+)\]", replace_citation, raw_answer)
+        parts: list[str] = []
+        last_idx = 0
+        for m, rep in zip(matches, replacements, strict=True):
+            parts.append(raw_answer[last_idx : m.start()])
+            parts.append(rep)
+            last_idx = m.end()
+        parts.append(raw_answer[last_idx:])
+        verified_answer = "".join(parts)
         return verified_answer, citations
 
     def calculate_confidence(

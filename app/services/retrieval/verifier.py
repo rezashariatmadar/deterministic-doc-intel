@@ -161,6 +161,11 @@ class QuoteVerifier:
         q_set = set(q_words)
         q_len = len(q_words)
 
+        # Fast pre-filter: if chunk has insufficient token overlap with quote, skip sentence search
+        chunk_words = set(re.findall(r"\w+", text.lower()))
+        if len(q_set & chunk_words) / max(q_len, 1) < 0.35:
+            return None
+
         sentence_matches = list(re.finditer(r"[^.!?\n]+(?:[.!?\n]+|$)", text))
         if not sentence_matches:
             return None

@@ -1,5 +1,6 @@
 """Integration tests for FastAPI application endpoints."""
 
+import math
 import os
 from collections.abc import AsyncGenerator
 
@@ -19,14 +20,27 @@ class DummyEmbeddingProvider(EmbeddingProvider):
 
     def __init__(self, dimension: int) -> None:
         super().__init__(model_name="dummy-embed", dimension=dimension)
-        # Unit vector along first dimension
-        self.vec = [1.0] + [0.0] * (dimension - 1)
+        self.dimension = dimension
+
+    def _embed(self, text: str) -> list[float]:
+        vec = [0.0] * self.dimension
+        vec[0] = 1.0  # Baseline component ensuring threshold > 0.35
+        text_lower = text.lower()
+        if (
+            "data center" in text_lower
+            or "217%" in text_lower
+            or "47.5" in text_lower
+            or "hgx" in text_lower
+        ):
+            vec[1] = 5.0
+        norm = math.sqrt(sum(x * x for x in vec))
+        return [x / norm for x in vec]
 
     async def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        return [self.vec for _ in texts]
+        return [self._embed(t) for t in texts]
 
     async def embed_query(self, query: str) -> list[float]:
-        return self.vec
+        return self._embed(query)
 
 
 class DummyLLMProvider(LLMProvider):
@@ -41,7 +55,10 @@ class DummyLLMProvider(LLMProvider):
         system_prompt: str | None = None,
         temperature: float = 0.0,
     ) -> str:
-        return "NVIDIA Data Center revenue was $47.5B in fiscal 2024 [1]."
+        return (
+            "Data Center revenue was $47.5B. Data Center revenue rose 217% "
+            "year-over-year to $47.5 billion [1]."
+        )
 
     async def generate_stream(
         self,
@@ -49,7 +66,10 @@ class DummyLLMProvider(LLMProvider):
         system_prompt: str | None = None,
         temperature: float = 0.0,
     ) -> AsyncGenerator[str, None]:
-        tokens = ["NVIDIA", " Data", " Center", " revenue", " was", " $47.5B", " [1]."]
+        tokens = [
+            "Data Center revenue was $47.5B. ",
+            "Data Center revenue rose 217% year-over-year to $47.5 billion [1].",
+        ]
         for t in tokens:
             yield t
 

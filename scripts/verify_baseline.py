@@ -9,6 +9,7 @@ Verifies:
 """
 
 import asyncio
+import math
 import os
 import sys
 import time
@@ -32,13 +33,35 @@ class VerificationEmbeddingProvider(EmbeddingProvider):
 
     def __init__(self, dimension: int) -> None:
         super().__init__(model_name="baseline-embed", dimension=dimension)
-        self.vec = [1.0] + [0.0] * (dimension - 1)
+        self.dimension = dimension
+
+    def _embed(self, text: str) -> list[float]:
+        vec = [0.0] * self.dimension
+        vec[0] = 1.0  # Baseline component ensuring threshold > 0.35
+        text_lower = text.lower()
+        if "data center" in text_lower or "217%" in text_lower or "47.5" in text_lower:
+            vec[1] = 5.0
+        if (
+            "compute & networking" in text_lower
+            or "graphics" in text_lower
+            or "reportable segment" in text_lower
+        ):
+            vec[2] = 5.0
+        if (
+            "market platform" in text_lower
+            or "gaming" in text_lower
+            or "10,447" in text_lower
+            or "47,525" in text_lower
+        ):
+            vec[3] = 5.0
+        norm = math.sqrt(sum(x * x for x in vec))
+        return [x / norm for x in vec]
 
     async def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        return [self.vec for _ in texts]
+        return [self._embed(t) for t in texts]
 
     async def embed_query(self, query: str) -> list[float]:
-        return self.vec
+        return self._embed(query)
 
 
 class VerificationLLMProvider(LLMProvider):
@@ -58,12 +81,12 @@ class VerificationLLMProvider(LLMProvider):
             return "The provided documents do not contain sufficient information to answer this question."
         if "compute & networking" in prompt_lower or "graphics" in prompt_lower:
             return (
-                "In fiscal 2024, Compute & Networking revenue was $47,405 million, "
-                "while Graphics revenue was $13,517 million [1]."
+                "Our business is organized into two primary reportable segments: "
+                "Compute & Networking and Graphics [1]."
             )
         return (
-            "Data Center revenue rose 217% to $47.5 billion in fiscal 2024, "
-            "driven by the NVIDIA HGX platform and Hopper architecture [1]."
+            "Data Center revenue rose 217% year-over-year to $47.5 billion, "
+            "primarily driven by strong enterprise demand for NVIDIA HGX [1]."
         )
 
     async def generate_stream(
