@@ -2,5 +2,16 @@
 
 from app.services.retrieval.generator import GroundedGenerator
 from app.services.retrieval.vector_search import VectorSearchService
+from app.services.retrieval.verifier import (
+    QuoteVerifier,
+    VerificationResult,
+    normalize_for_matching,
+)
 
-__all__ = ["GroundedGenerator", "VectorSearchService"]
+__all__ = [
+    "GroundedGenerator",
+    "QuoteVerifier",
+    "VectorSearchService",
+    "VerificationResult",
+    "normalize_for_matching",
+]
