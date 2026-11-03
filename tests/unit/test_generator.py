@@ -187,3 +187,68 @@ def test_generator_accepts_optional_quote_verifier(
     generator = GroundedGenerator(llm_provider=None, quote_verifier=custom_verifier)
     assert generator.quote_verifier is custom_verifier
 
+
+def test_citation_verification_clustered_and_punctuation_separated_citations() -> None:
+    c1 = RetrievedChunk(
+        source_id=1,
+        chunk_id=uuid.uuid4(),
+        document_id=uuid.uuid4(),
+        document_title="NVIDIA 10-K",
+        page_start=45,
+        page_end=45,
+        section_path="Item 7 > Financial Results",
+        element_type="prose",
+        text="Total revenue increased significantly across all core segments in fiscal 2024.",
+        contextualized_text="[Doc: NVIDIA 10-K] Total revenue increased.",
+        similarity_score=0.92,
+    )
+    c2 = RetrievedChunk(
+        source_id=2,
+        chunk_id=uuid.uuid4(),
+        document_id=uuid.uuid4(),
+        document_title="NVIDIA 10-K",
+        page_start=46,
+        page_end=46,
+        section_path="Item 7 > Segment Analysis",
+        element_type="prose",
+        text="Total revenue increased significantly across all core segments in fiscal 2024.",
+        contextualized_text="[Doc: NVIDIA 10-K] Total revenue increased.",
+        similarity_score=0.89,
+    )
+    chunks = [c1, c2]
+    generator = GroundedGenerator(llm_provider=None)
+
+    # 1. Immediate clustered citations [1][2]
+    raw_1 = "Total revenue increased significantly across all core segments in fiscal 2024 [1][2]."
+    ans_1, cits_1 = generator.verify_and_extract_citations(raw_1, chunks)
+    assert "[1][2]" in ans_1
+    assert len(cits_1) == 2
+    assert {c.source_id for c in cits_1} == {1, 2}
+    assert all(
+        c.quote == "Total revenue increased significantly across all core segments in fiscal 2024"
+        for c in cits_1
+    )
+
+    # 2. Punctuation-separated clustered citations [1], [2]
+    raw_2 = (
+        "Total revenue increased significantly across all core segments in fiscal 2024 [1], [2]."
+    )
+    ans_2, cits_2 = generator.verify_and_extract_citations(raw_2, chunks)
+    assert "[1], [2]" in ans_2
+    assert len(cits_2) == 2
+    assert {c.source_id for c in cits_2} == {1, 2}
+    assert all(
+        c.quote == "Total revenue increased significantly across all core segments in fiscal 2024"
+        for c in cits_2
+    )
+
+    # 3. Semicolon-separated clustered citations [1]; [2]
+    raw_3 = (
+        "Total revenue increased significantly across all core segments in fiscal 2024 [1]; [2]."
+    )
+    ans_3, cits_3 = generator.verify_and_extract_citations(raw_3, chunks)
+    assert "[1]; [2]" in ans_3
+    assert len(cits_3) == 2
+    assert {c.source_id for c in cits_3} == {1, 2}
+
+

@@ -77,7 +77,7 @@ class GroundedGenerator:
             # Extract preceding text back to sentence/paragraph boundary
             preceding = raw_answer[prev_end : m.start()]
             claim_text = ""
-            if preceding.strip():
+            if preceding.strip(" \t\r\n,;:-"):
                 boundaries = [0]
                 for bm in re.finditer(r"[\r\n]+|(?<!\d)(?<=[.!?])\s+", preceding):
                     boundaries.append(bm.end())
@@ -88,11 +88,15 @@ class GroundedGenerator:
                 ]
                 sents = [s for s in sents if s]
                 claim_text = sents[-1] if sents else preceding.strip()
-            else:
-                # Fallback: clustered citation [1][2] -> check text before previous citations
+
+            claim_text = claim_text.strip(" \t\r\n,;:-")
+
+            # Fallback when claim_text is empty (e.g. clustered [1][2], [1], [2], or leading [1])
+            if not claim_text:
                 if i > 0:
                     text_before = raw_answer[: m.start()]
-                    stripped_before = re.sub(r"(\[\d+\]\s*)+$", "", text_before)
+                    # Strip trailing citations and any separating punctuation or whitespace
+                    stripped_before = re.sub(r"(\[\d+\][\s,;:-]*)+$", "", text_before)
                     boundaries = [0]
                     for bm in re.finditer(
                         r"[\r\n]+|(?<!\d)(?<=[.!?])\s+", stripped_before
@@ -123,8 +127,12 @@ class GroundedGenerator:
 
             claim_text = claim_text.strip(" \t\r\n,;:-")
 
-            # Check for inner quoted phrase within quotation marks
-            quote_match = re.search(r"[\"“\']([^\"”\']{3,})[\"”\']", claim_text)
+            # Check for paired inner quotes (double or curly quotes; avoid contractions)
+            quote_match = (
+                re.search(r'"([^"]{3,})"', claim_text)
+                or re.search(r'“([^”]{3,})”', claim_text)
+                or re.search(r'‘([^’]{3,})’', claim_text)
+            )
             inner_quote = quote_match.group(1).strip() if quote_match else None
 
             if orig_source_id in chunk_map:

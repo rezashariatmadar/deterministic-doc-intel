@@ -131,6 +131,11 @@ class QuoteVerifier:
         if not norm_quote:
             return None
 
+        # Fast pre-filter: if text does not contain any of quote's leading words, skip mapping
+        q_tokens = norm_quote.split()
+        if q_tokens and not any(t in text.lower() for t in q_tokens[:3]):
+            return None
+
         norm_text, char_map = normalize_with_mapping(text)
         if not norm_text or not char_map:
             return None
