@@ -169,3 +169,18 @@ def test_factory_creates_expected_providers() -> None:
 
     with pytest.raises(ConfigurationError, match="Unsupported embedding provider"):
         get_embedding_provider(provider_type="unknown")
+
+
+def test_local_embedding_provider_respects_settings_model() -> None:
+    from app.core.config import get_settings
+    settings = get_settings()
+    provider = get_embedding_provider(provider_type="local")
+    assert provider.model_name == settings.EMBEDDING_MODEL
+
+
+def test_gemini_configuration_handling() -> None:
+    with pytest.raises(ConfigurationError, match="Gemini provider is not yet installed"):
+        get_embedding_provider(provider_type="gemini")
+    with pytest.raises(ConfigurationError, match="Gemini provider is not yet installed"):
+        get_llm_provider(provider_type="gemini")
+

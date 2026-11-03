@@ -19,6 +19,7 @@ from fastapi import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_db, get_embedding
+from app.core.config import get_settings
 from app.core.exceptions import DocumentNotFoundError
 from app.db.repositories.chunk_repo import ChunkRepository
 from app.db.repositories.document_repo import DocumentRepository
@@ -92,13 +93,17 @@ async def ingest_document(
         )
 
         # 4. Generate structural chunks
-        chunker = DocumentChunker()
+        settings = get_settings()
+        chunker = DocumentChunker(
+            target_tokens=settings.CHUNK_SIZE,
+            overlap_tokens=settings.CHUNK_OVERLAP,
+        )
         draft_chunks = chunker.chunk_document(parsed_doc)
 
         if draft_chunks:
             # 5. Compute vector embeddings in batches
             texts_to_embed = [c.contextualized_text for c in draft_chunks]
-            batch_size = 32
+            batch_size = settings.EMBEDDING_BATCH_SIZE
             embeddings: list[list[float]] = []
 
             for i in range(0, len(texts_to_embed), batch_size):

@@ -25,6 +25,11 @@ def get_embedding_provider(
     ptype = (provider_type or settings.EMBEDDING_PROVIDER).lower()
     dim = dimension or settings.EMBEDDING_DIMENSION
 
+    if ptype == "gemini":
+        raise ConfigurationError(
+            "Gemini provider is not yet installed. Please use 'openai' or 'local'."
+        )
+
     if ptype == "openai":
         key = api_key or settings.OPENAI_API_KEY
         mname = model_name or settings.OPENAI_EMBEDDING_MODEL
@@ -36,7 +41,7 @@ def get_embedding_provider(
 
     if ptype == "local":
         url = base_url or settings.LOCAL_LLM_BASE_URL
-        mname = model_name or "nomic-embed-text"
+        mname = model_name or settings.EMBEDDING_MODEL
         return LocalHttpEmbeddingProvider(
             base_url=url,
             model_name=mname,
@@ -57,6 +62,11 @@ def get_llm_provider(
     """Instantiate and return the appropriate LLMProvider."""
     settings = get_settings()
     ptype = (provider_type or settings.LLM_PROVIDER).lower()
+
+    if ptype == "gemini":
+        raise ConfigurationError(
+            "Gemini provider is not yet installed. Please use 'openai' or 'local'."
+        )
 
     if ptype == "openai":
         key = api_key or settings.OPENAI_API_KEY

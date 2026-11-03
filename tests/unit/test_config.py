@@ -141,3 +141,17 @@ def test_setup_logging():
     assert root.level == logging.DEBUG
     assert len(root.handlers) > 0
     assert isinstance(root.handlers[0].formatter, JSONFormatter)
+
+
+def test_cors_configuration_validity():
+    from starlette.middleware.cors import CORSMiddleware
+
+    from app.main import app
+
+    for middleware in app.user_middleware:
+        if getattr(middleware, "cls", None) == CORSMiddleware:
+            kwargs = getattr(middleware, "kwargs", {})
+            origins = kwargs.get("allow_origins", [])
+            assert isinstance(origins, list)
+            assert not ("*" in origins and kwargs.get("allow_credentials") is True)
+
