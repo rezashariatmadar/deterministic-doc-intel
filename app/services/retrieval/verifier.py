@@ -48,13 +48,10 @@ def normalize_with_mapping(text: str) -> tuple[str, list[int]]:
         # Normalize NFKC characters (e.g. ligatures)
         norm_chars = unicodedata.normalize("NFKC", char)
         for nc in norm_chars:
-            is_punct = (
-                nc not in _QUANTITATIVE_SYMBOLS
-                and (
-                    nc in string.punctuation
-                    or unicodedata.category(nc).startswith("P")
-                    or nc in _EXTRA_PUNCTUATION
-                )
+            is_punct = nc not in _QUANTITATIVE_SYMBOLS and (
+                nc in string.punctuation
+                or unicodedata.category(nc).startswith("P")
+                or nc in _EXTRA_PUNCTUATION
             )
             if is_punct or nc.isspace():
                 if not in_whitespace and chars:

@@ -283,10 +283,7 @@ def test_fuzzy_match_latency_on_large_candidate_pool() -> None:
         "The quarterly financial results were reported by management today in "
         "accordance with GAAP accounting standards and statutory frameworks. "
     ) * 30  # ~510 words
-    chunks = [
-        make_chunk(source_id=i + 1, text=f"[Chunk {i + 1}] {long_text}")
-        for i in range(5)
-    ]
+    chunks = [make_chunk(source_id=i + 1, text=f"[Chunk {i + 1}] {long_text}") for i in range(5)]
     verifier = QuoteVerifier()
     unverified_claim = (
         "Tesla manufactured 450,000 electric sedans during the first half of the year."
