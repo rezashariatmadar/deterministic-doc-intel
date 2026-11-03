@@ -30,6 +30,29 @@ services:
       timeout: 5s
       retries: 5
 
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rag_api
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/rag_db
+      - REDIS_URL=redis://localhost:6379/0
+      - EMBEDDING_PROVIDER=local
+      - LLM_PROVIDER=local
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/v1/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   postgres_data:
   redis_data:

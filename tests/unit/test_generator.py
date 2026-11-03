@@ -296,3 +296,27 @@ def test_citation_verification_collapses_adjacent_duplicate_brackets(
     assert cits[0].source_id == 1
 
 
+@pytest.mark.asyncio
+async def test_rag_response_is_answerable_and_citation_document_id(
+    sample_chunks: list[RetrievedChunk],
+) -> None:
+    mock_llm = MockLLMProvider("Data Center revenue rose 217% to $47.5B in fiscal 2024 [1].")
+    generator = GroundedGenerator(llm_provider=mock_llm)
+
+    # 1. Answerable query
+    res = await generator.generate("What was Data Center revenue?", sample_chunks)
+    assert res.is_answerable is True
+    assert len(res.citations) == 1
+    assert res.citations[0].document_id == sample_chunks[0].document_id
+    assert (
+        res.citations[0].supporting_quote
+        == "Data Center revenue rose 217% to $47.5B in fiscal 2024"
+    )
+
+    # 2. Unanswerable query with empty chunks
+    unans_res = await generator.generate("What was Data Center revenue?", [])
+    assert unans_res.is_answerable is False
+    assert len(unans_res.citations) == 0
+
+
+

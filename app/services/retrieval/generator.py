@@ -191,10 +191,12 @@ class GroundedGenerator:
                         citations.append(
                             Citation(
                                 source_id=effective_id,
+                                document_id=chunk.document_id,
                                 document_title=chunk.document_title,
                                 page_start=chunk.page_start,
                                 page_end=chunk.page_end,
                                 section_path=chunk.section_path,
+                                supporting_quote=res.verified_quote,
                                 quote=res.verified_quote,
                             )
                         )
@@ -263,6 +265,7 @@ class GroundedGenerator:
             )
             return RAGResponse(
                 answer=unanswerable_msg,
+                is_answerable=False,
                 citations=[],
                 sources=[],
                 confidence_score=0.0,
@@ -289,9 +292,11 @@ class GroundedGenerator:
         has_unverified = "[unverified:" in verified_answer
         confidence = self.calculate_confidence(chunks, citations, has_unverified, verified_answer)
         latency_ms = (time.perf_counter() - start_time) * 1000.0
+        is_answerable = "do not contain sufficient information" not in verified_answer.lower()
 
         return RAGResponse(
             answer=verified_answer,
+            is_answerable=is_answerable,
             citations=citations,
             sources=chunks,
             confidence_score=confidence,

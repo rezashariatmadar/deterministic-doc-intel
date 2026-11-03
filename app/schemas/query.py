@@ -1,5 +1,6 @@
 """Pydantic schemas for search query requests, retrieved chunks, and RAG responses."""
 
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -58,17 +59,29 @@ class Citation(BaseModel):
     """Ground truth citation linking an answer statement to a retrieved source."""
 
     source_id: int
+    document_id: UUID | None = None
     document_title: str
     page_start: int
     page_end: int
     section_path: str
+    supporting_quote: str | None = None
     quote: str | None = None
+
+    def model_post_init(self, __context: Any) -> None:
+        if self.supporting_quote is None and self.quote is not None:
+            self.supporting_quote = self.quote
+        elif self.quote is None and self.supporting_quote is not None:
+            self.quote = self.supporting_quote
 
 
 class RAGResponse(BaseModel):
     """Final grounded RAG answer with verified citations and metrics."""
 
     answer: str
+    is_answerable: bool = Field(
+        default=True,
+        description="Whether the retrieved context provides sufficient evidence",
+    )
     citations: list[Citation] = Field(default_factory=list)
     sources: list[RetrievedChunk] = Field(default_factory=list)
     confidence_score: float = Field(

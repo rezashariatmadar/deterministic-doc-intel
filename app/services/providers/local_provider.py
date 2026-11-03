@@ -15,8 +15,8 @@ class LocalHttpEmbeddingProvider(EmbeddingProvider):
     def __init__(
         self,
         base_url: str = "http://localhost:11434/v1",
-        model_name: str = "nomic-embed-text",
-        dimension: int = 768,
+        model_name: str = "BAAI/bge-m3",
+        dimension: int = 1024,
         timeout: float = 60.0,
     ) -> None:
         super().__init__(model_name=model_name, dimension=dimension)

@@ -24,7 +24,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy virtualenv and app code from builder
 COPY --from=builder /app/.venv /app/.venv
 COPY app /app/app
-COPY pyproject.toml README.md ./
+COPY alembic /app/alembic
+COPY alembic.ini pyproject.toml README.md ./
 
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
