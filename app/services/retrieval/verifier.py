@@ -11,12 +11,16 @@ from app.schemas.query import RetrievedChunk
 # Punctuation and quotation mark characters to strip/normalize
 _EXTRA_PUNCTUATION = {"—", "–", "−", "…", "“", "”", "‘", "’", "«", "»"}
 
+# Hyphenated word split across line breaks (e.g. "oper-\nating" -> "operating")
+_HYPHEN_LINEBREAK_REGEX = re.compile(r"-\s*[\r\n]+\s*")
+
 
 def normalize_with_mapping(text: str) -> tuple[str, list[int]]:
     """
     Normalize text for matching while building a character index map back to original text.
 
     Strips punctuation, normalizes unicode quotes/dashes, collapses whitespace, and folds case.
+    Also removes hyphenated line breaks so words broken across lines merge cleanly.
     Returns:
         tuple[str, list[int]]: The normalized string and a list where each element
         is the character index in `text` corresponding to that character in the output.
@@ -24,11 +28,20 @@ def normalize_with_mapping(text: str) -> tuple[str, list[int]]:
     if not text:
         return "", []
 
+    # Identify hyphenated line break ranges to skip completely (e.g. "oper-\nating" -> "operating")
+    skip_indices: set[int] = set()
+    for m in _HYPHEN_LINEBREAK_REGEX.finditer(text):
+        for i in range(m.start(), m.end()):
+            skip_indices.add(i)
+
     chars: list[str] = []
     mapping: list[int] = []
     in_whitespace = False
 
     for idx, char in enumerate(text):
+        if idx in skip_indices:
+            continue
+
         # Normalize NFKC characters (e.g. ligatures)
         norm_chars = unicodedata.normalize("NFKC", char)
         for nc in norm_chars:
@@ -45,6 +58,9 @@ def normalize_with_mapping(text: str) -> tuple[str, list[int]]:
             else:
                 folded = nc.casefold()
                 for fc in folded:
+                    # Skip non-spacing combining marks (e.g. dot above \u0307 in Turkish 'İ')
+                    if unicodedata.category(fc) == "Mn":
+                        continue
                     chars.append(fc)
                     mapping.append(idx)
                 in_whitespace = False
@@ -86,6 +102,15 @@ class QuoteVerifier:
     - Tier 5: unverified (hallucination or ungrounded claim).
     """
 
+    @staticmethod
+    def _clean_boundary(best_slice: str, clean_quote: str) -> str:
+        """Clean boundary punctuation if clean_quote did not have it."""
+        if clean_quote and clean_quote[-1] not in ".!?,:;" and best_slice[-1] in ".!?,:;":
+            best_slice = best_slice.rstrip(".!?,:; ")
+        if clean_quote and clean_quote[0] not in "\"'([{" and best_slice[0] in "\"'([{":
+            best_slice = best_slice.lstrip("\"'([{ ")
+        return best_slice
+
     def _normalized_match(self, quote: str, text: str) -> str | None:
         """Attempt normalized matching and return original slice from text."""
         if not quote.strip() or not text.strip():
@@ -93,12 +118,13 @@ class QuoteVerifier:
 
         clean_quote = quote.strip()
 
-        # Fast path 1: simple case-fold match
-        quote_lower = clean_quote.lower()
-        text_lower = text.lower()
-        pos = text_lower.find(quote_lower)
-        if pos != -1:
-            return text[pos : pos + len(clean_quote)]
+        # Fast path 1: simple case-fold match for pure ASCII text only (avoids unicode drift)
+        if clean_quote.isascii() and text.isascii():
+            quote_lower = clean_quote.lower()
+            text_lower = text.lower()
+            pos = text_lower.find(quote_lower)
+            if pos != -1:
+                return text[pos : pos + len(clean_quote)]
 
         # Path 2: full normalization with character position mapping
         norm_quote = normalize_for_matching(clean_quote)
@@ -129,63 +155,75 @@ class QuoteVerifier:
             return None
 
         quote_lower = clean_quote.lower()
-        quote_words = quote_lower.split()
-        q_len = len(quote_words)
-        q_set = set(re.findall(r"\w+", quote_lower))
-        if not q_set:
+        q_words = re.findall(r"\w+", quote_lower)
+        if not q_words:
+            return None
+        q_set = set(q_words)
+        q_len = len(q_words)
+
+        sentence_matches = list(re.finditer(r"[^.!?\n]+(?:[.!?\n]+|$)", text))
+        if not sentence_matches:
             return None
 
         best_slice: str | None = None
         best_ratio = 0.0
 
-        # 1. Check individual sentences and 2-sentence pairs
-        sentence_matches = list(re.finditer(r"[^.!?\n]+(?:[.!?\n]+|$)", text))
-        for i, sm in enumerate(sentence_matches):
-            s_slice = sm.group().strip()
-            if s_slice:
-                r = difflib.SequenceMatcher(None, quote_lower, s_slice.lower()).ratio()
+        # Step 1: Pre-filter sentences and evaluate sliding sentence windows
+        sent_spans: list[tuple[int, int, str, str, set[str], int]] = []
+        for sm in sentence_matches:
+            s = sm.group().strip()
+            if s:
+                s_lower = s.lower()
+                s_set = set(re.findall(r"\w+", s_lower))
+                overlap = len(q_set & s_set)
+                sent_spans.append((sm.start(), sm.end(), s, s_lower, s_set, overlap))
+
+        for i in range(len(sent_spans)):
+            start, _, s_text, s_lower, s_set, overlap = sent_spans[i]
+            # Pre-filter using token overlap to prevent unnecessary SequenceMatcher calls
+            if overlap / max(q_len, 1) >= 0.35:
+                r = difflib.SequenceMatcher(None, quote_lower, s_lower).ratio()
                 if r > best_ratio:
                     best_ratio = r
-                    best_slice = s_slice
+                    best_slice = s_text
 
-            if i + 1 < len(sentence_matches):
-                s_pair = text[sm.start() : sentence_matches[i + 1].end()].strip()
-                if s_pair:
-                    r = difflib.SequenceMatcher(None, quote_lower, s_pair.lower()).ratio()
+            if i + 1 < len(sent_spans):
+                _, next_end, _, _, next_set, _ = sent_spans[i + 1]
+                pair_overlap = len(q_set & (s_set | next_set))
+                if pair_overlap / max(q_len, 1) >= 0.35:
+                    pair_text = text[start:next_end].strip()
+                    r = difflib.SequenceMatcher(None, quote_lower, pair_text.lower()).ratio()
                     if r > best_ratio:
                         best_ratio = r
-                        best_slice = s_pair
+                        best_slice = pair_text
 
-        # 2. Sliding window of words in text
-        word_matches = list(re.finditer(r"\S+", text))
-        total_words = len(word_matches)
+        # Early return after Step 1 sentence check
+        if best_ratio >= threshold and best_slice:
+            return self._clean_boundary(best_slice, clean_quote)
 
-        min_w = max(1, q_len - 3)
-        max_w = min(total_words, q_len + 4)
+        # Step 2: Phrase sliding window within sentences having high token overlap
+        for _, _, s_text, _, _, overlap in sent_spans:
+            if overlap / max(q_len, 1) < 0.4:
+                continue
 
-        for w in range(min_w, max_w + 1):
-            for i in range(total_words - w + 1):
-                start_pos = word_matches[i].start()
-                end_pos = word_matches[i + w - 1].end()
-                cand_slice = text[start_pos:end_pos].strip()
+            # Pre-tokenize sentence into word match objects once
+            w_matches = list(re.finditer(r"\S+", s_text))
+            num_w = len(w_matches)
+            min_w = max(1, q_len - 3)
+            max_w = min(num_w, q_len + 4)
 
-                cand_words = set(re.findall(r"\w+", cand_slice.lower()))
-                overlap = len(q_set & cand_words)
-                if overlap / max(len(q_set), 1) < 0.4:
-                    continue
-
-                r = difflib.SequenceMatcher(None, quote_lower, cand_slice.lower()).ratio()
-                if r > best_ratio:
-                    best_ratio = r
-                    best_slice = cand_slice
+            for w in range(min_w, max_w + 1):
+                for i in range(num_w - w + 1):
+                    c_start = w_matches[i].start()
+                    c_end = w_matches[i + w - 1].end()
+                    cand = s_text[c_start:c_end].strip()
+                    r = difflib.SequenceMatcher(None, quote_lower, cand.lower()).ratio()
+                    if r > best_ratio:
+                        best_ratio = r
+                        best_slice = cand
 
         if best_ratio >= threshold and best_slice:
-            # Clean up boundary punctuation if quote did not have it
-            if clean_quote and clean_quote[-1] not in ".!?,:;" and best_slice[-1] in ".!?,:;":
-                best_slice = best_slice.rstrip(".!?,:; ")
-            if clean_quote and clean_quote[0] not in "\"'([{" and best_slice[0] in "\"'([{":
-                best_slice = best_slice.lstrip("\"'([{ ")
-            return best_slice
+            return self._clean_boundary(best_slice, clean_quote)
 
         return None
 
@@ -241,9 +279,7 @@ class QuoteVerifier:
         # Tier 4: cross-chunk re-homing across other candidate chunks
         if candidate_chunks:
             other_candidates = [
-                c
-                for c in candidate_chunks
-                if c.source_id != primary_chunk.source_id or c.chunk_id != primary_chunk.chunk_id
+                c for c in candidate_chunks if c.source_id != primary_chunk.source_id
             ]
 
             # Check Tier 1 across candidates

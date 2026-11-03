@@ -1,5 +1,6 @@
 """Unit tests for the deterministic QuoteVerifier and multi-tier repair ladder."""
 
+import time
 import uuid
 
 from app.schemas.query import RetrievedChunk
@@ -236,3 +237,65 @@ def test_verify_claim_or_quote_alias() -> None:
     assert isinstance(res, VerificationResult)
     assert res.is_verified is True
     assert res.match_tier == "exact"
+
+
+def test_tier2_non_ascii_turkish_i_and_ligature_normalization() -> None:
+    text = "Ofis İSTANBUL merkezlidir ve operasyon devam ediyor."
+    chunk = make_chunk(source_id=1, text=text)
+    verifier = QuoteVerifier()
+    # Turkish capital I with dot 'İ' folded to 'i' in quote
+    quote = "ofis istanbul merkezlidir"
+    res = verifier.verify_citation(quote, chunk, [chunk])
+
+    assert isinstance(res, VerificationResult)
+    assert res.is_verified is True
+    assert res.match_tier == "normalized"
+    assert res.verified_quote == "Ofis İSTANBUL merkezlidir"
+
+    # Ligature handling
+    ligature_text = "Specialized compute ﬁles were loaded."
+    ligature_chunk = make_chunk(source_id=2, text=ligature_text)
+    ligature_quote = "specialized compute files were loaded"
+    res_lig = verifier.verify_citation(ligature_quote, ligature_chunk, [ligature_chunk])
+    assert res_lig.is_verified is True
+    assert res_lig.match_tier == "normalized"
+    assert res_lig.verified_quote is not None
+    assert "compute ﬁles" in res_lig.verified_quote
+
+
+def test_hyphenated_line_break_normalization() -> None:
+    text = "This reduces oper-\nating costs by 20%."
+    chunk = make_chunk(source_id=1, text=text)
+    verifier = QuoteVerifier()
+    quote = "operating cost"
+    res = verifier.verify_citation(quote, chunk, [chunk])
+
+    assert isinstance(res, VerificationResult)
+    assert res.is_verified is True
+    assert res.match_tier == "normalized"
+    assert res.verified_quote is not None
+    assert "oper-\nating cost" in res.verified_quote
+
+
+def test_fuzzy_match_latency_on_large_candidate_pool() -> None:
+    # 5 candidate chunks of 500 words each
+    long_text = (
+        "The quarterly financial results were reported by management today in "
+        "accordance with GAAP accounting standards and statutory frameworks. "
+    ) * 30  # ~510 words
+    chunks = [
+        make_chunk(source_id=i + 1, text=f"[Chunk {i + 1}] {long_text}")
+        for i in range(5)
+    ]
+    verifier = QuoteVerifier()
+    unverified_claim = (
+        "Tesla manufactured 450,000 electric sedans during the first half of the year."
+    )
+
+    t0 = time.perf_counter()
+    res = verifier.verify_citation(unverified_claim, chunks[0], chunks)
+    dt_ms = (time.perf_counter() - t0) * 1000.0
+
+    assert res.is_verified is False
+    assert res.match_tier is None
+    assert dt_ms < 5.0, f"Verification exceeded 5ms limit: took {dt_ms:.2f}ms"
