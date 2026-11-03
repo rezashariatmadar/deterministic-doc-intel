@@ -62,8 +62,11 @@ async def ingest_document(
     # 1. Idempotency check: return existing document if already ingested
     existing_doc = await doc_repo.get_by_hash(file_hash)
     if existing_doc:
-        response.status_code = status.HTTP_200_OK
-        return DocumentRead.model_validate(existing_doc)
+        if existing_doc.status == "COMPLETED":
+            response.status_code = status.HTTP_200_OK
+            return DocumentRead.model_validate(existing_doc)
+        # Previous attempt failed or was incomplete; purge it to reprocess cleanly
+        await doc_repo.delete(existing_doc.id)
 
     # 2. Save temporary file to run layout-aware parser
     filename = file.filename or "uploaded_document.pdf"
@@ -73,6 +76,7 @@ async def ingest_document(
         tmp_file.write(content)
         tmp_path = tmp_file.name
 
+    doc = None
     try:
         parser = PDFLayoutParser()
         parsed_doc = parser.parse(Path(tmp_path))
@@ -131,16 +135,27 @@ async def ingest_document(
             ]
             await chunk_repo.bulk_create(chunk_creates)
 
-        # 7. Update document status to INDEXED
+        # 7. Update document status to COMPLETED
         updated_doc = await doc_repo.update_status(
             doc_id=doc.id,
-            status="indexed",
+            status="COMPLETED",
             total_chunks=len(draft_chunks),
         )
 
         assert updated_doc is not None
         return DocumentRead.model_validate(updated_doc)
 
+    except Exception as exc:
+        if doc is not None:
+            await doc_repo.update_status(
+                doc_id=doc.id,
+                status="FAILED",
+                error_message=str(exc),
+            )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Document ingestion failed: {exc}",
+        ) from exc
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)

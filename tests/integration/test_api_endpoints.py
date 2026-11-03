@@ -119,7 +119,7 @@ async def test_document_ingestion_list_query_delete_flow(
     assert doc_data["title"] is not None
     assert doc_data["total_pages"] == 3
     assert doc_data["total_chunks"] > 0
-    assert doc_data["status"] == "indexed"
+    assert doc_data["status"] == "COMPLETED"
     doc_id = doc_data["id"]
 
     try:
@@ -171,3 +171,56 @@ async def test_document_ingestion_list_query_delete_flow(
         # 6. Delete document via DELETE /api/v1/documents/{id}
         del_resp = await api_client.delete(f"/api/v1/documents/{doc_id}")
         assert del_resp.status_code in [200, 204]
+
+
+@pytest.mark.asyncio
+async def test_ingestion_failure_updates_status_and_allows_reingestion(
+    api_client: AsyncClient,
+) -> None:
+    from unittest.mock import AsyncMock
+    pdf_path = "data/raw_corpus/nvidia_10k_sample.pdf"
+    assert os.path.exists(pdf_path)
+
+    failing_provider = AsyncMock()
+    failing_provider.embed_texts.side_effect = RuntimeError("Embedding provider crashed")
+    failing_provider.model_name = "failing-model"
+
+    app.dependency_overrides[get_embedding] = lambda: failing_provider
+
+    with open(pdf_path, "rb") as f:
+        fail_resp = await api_client.post(
+            "/api/v1/documents/ingest",
+            files={"file": ("nvidia_sample.pdf", f, "application/pdf")},
+            data={"category": "financial_report"},
+        )
+    assert fail_resp.status_code == 500
+
+    # Verify document in DB is marked FAILED, not PENDING
+    list_resp = await api_client.get("/api/v1/documents")
+    assert list_resp.status_code == 200
+    docs = list_resp.json()
+    failed_doc = next((d for d in docs if d["filename"] == "nvidia_sample.pdf"), None)
+    assert failed_doc is not None
+    assert failed_doc["status"] == "FAILED"
+    assert "Embedding provider crashed" in (failed_doc["error_message"] or "")
+
+    # Re-attempting ingestion with working provider should re-process
+    # instead of returning the broken doc
+    app.dependency_overrides[get_embedding] = lambda: DummyEmbeddingProvider(
+        settings.EMBEDDING_DIMENSION
+    )
+    with open(pdf_path, "rb") as f:
+        retry_resp = await api_client.post(
+            "/api/v1/documents/ingest",
+            files={"file": ("nvidia_sample.pdf", f, "application/pdf")},
+            data={"category": "financial_report"},
+        )
+    assert retry_resp.status_code in [200, 201]
+    repaired_doc = retry_resp.json()
+    assert repaired_doc["status"] == "COMPLETED"
+    assert repaired_doc["total_chunks"] > 0
+
+    # Cleanup
+    del_resp = await api_client.delete(f"/api/v1/documents/{repaired_doc['id']}")
+    assert del_resp.status_code in [200, 204]
+
