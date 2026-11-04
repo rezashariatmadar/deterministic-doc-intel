@@ -319,4 +319,20 @@ async def test_rag_response_is_answerable_and_citation_document_id(
     assert len(unans_res.citations) == 0
 
 
+@pytest.mark.asyncio
+async def test_rag_response_downgrades_when_all_citations_fail(
+    sample_chunks: list[RetrievedChunk],
+) -> None:
+    # LLM asserts an answer with a hallucinated citation that fails verification
+    hallucinated_text = "Operating margin expanded to 99% in fiscal 2024 [1]."
+    mock_llm = MockLLMProvider(hallucinated_text)
+    generator = GroundedGenerator(llm_provider=mock_llm)
+
+    res = await generator.generate("What was operating margin?", sample_chunks)
+    assert res.is_answerable is False
+    assert res.confidence_score == 0.0
+    assert len(res.citations) == 0
+    assert "[unverified: 1]" in res.answer
+
+
 

@@ -1,8 +1,10 @@
 """Integration tests for FastAPI application endpoints."""
 
+import json
 import math
 import os
 from collections.abc import AsyncGenerator
+from typing import Any
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -120,6 +122,9 @@ async def test_document_ingestion_list_query_delete_flow(
     assert doc_data["total_pages"] == 3
     assert doc_data["total_chunks"] > 0
     assert doc_data["status"] == "COMPLETED"
+    assert "table_count" in doc_data["extra_metadata"]
+    assert "heading_count" in doc_data["extra_metadata"]
+    assert doc_data["extra_metadata"]["parser"] == "PDFLayoutParser"
     doc_id = doc_data["id"]
 
     try:
@@ -166,6 +171,26 @@ async def test_document_ingestion_list_query_delete_flow(
         assert "text/event-stream" in stream_resp.headers["content-type"]
         body_text = stream_resp.text
         assert "data: " in body_text
+
+        # Parse SSE events from body text
+        events: list[dict[str, Any]] = []
+        for line in body_text.splitlines():
+            line = line.strip()
+            if line.startswith("data: ") and not line.startswith("data: [DONE]"):
+                payload = json.loads(line[6:])
+                events.append(payload)
+
+        event_names = [e.get("event") for e in events]
+        assert "sources" in event_names
+        assert "token" in event_names
+        assert "verification" in event_names
+
+        verification_event = next(e for e in events if e.get("event") == "verification")
+        v_data = verification_event["data"]
+        assert v_data["is_answerable"] is True
+        assert v_data["confidence_score"] > 0.0
+        assert len(v_data["citations"]) >= 1
+        assert "latency_ms" in v_data
 
     finally:
         # 6. Delete document via DELETE /api/v1/documents/{id}

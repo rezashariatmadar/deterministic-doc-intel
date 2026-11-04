@@ -288,11 +288,27 @@ class GroundedGenerator:
             temperature=0.0,
         )
 
+        return self.finalize_stream_response(raw_answer, chunks, start_time)
+
+    def finalize_stream_response(
+        self,
+        raw_answer: str,
+        chunks: list[RetrievedChunk],
+        start_time: float,
+    ) -> RAGResponse:
+        """Process raw model output through verification and build final RAGResponse."""
         verified_answer, citations = self.verify_and_extract_citations(raw_answer, chunks)
         has_unverified = "[unverified:" in verified_answer
         confidence = self.calculate_confidence(chunks, citations, has_unverified, verified_answer)
         latency_ms = (time.perf_counter() - start_time) * 1000.0
         is_answerable = "do not contain sufficient information" not in verified_answer.lower()
+
+        # Guard: If answer claimed factual citations but every citation failed verification,
+        # refuse to pass unverified assertions as factually answerable.
+        has_cited_brackets = bool(re.search(r"\[\d+\]", raw_answer))
+        if is_answerable and has_cited_brackets and len(citations) == 0:
+            is_answerable = False
+            confidence = 0.0
 
         return RAGResponse(
             answer=verified_answer,

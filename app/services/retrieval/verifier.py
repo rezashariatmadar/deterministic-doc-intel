@@ -17,6 +17,18 @@ _QUANTITATIVE_SYMBOLS = {"$", "%", "€", "£", "¥"}
 # Hyphenated word split across line breaks (e.g. "oper-\nating" -> "operating")
 _HYPHEN_LINEBREAK_REGEX = re.compile(r"-\s*[\r\n]+\s*")
 
+# Breadcrumb header prefix pattern injected into chunk context
+_BREADCRUMB_PREFIX_REGEX = re.compile(
+    r"^\[Document:[^\]]+(?:\s*\|\s*(?:Section|Page):[^\]]+)*\]\s*",
+    re.IGNORECASE,
+)
+
+
+def extract_numeric_tokens(text: str) -> set[str]:
+    """Extract normalized numeric tokens (commas removed, decimals preserved)."""
+    raw_nums = re.findall(r"\b\d+(?:[.,]\d+)*%?\b", text)
+    return {n.replace(",", "").rstrip("%") for n in raw_nums if any(c.isdigit() for c in n)}
+
 
 def normalize_with_mapping(text: str) -> tuple[str, list[int]]:
     """
@@ -158,8 +170,9 @@ class QuoteVerifier:
             return None
 
         # Verify numbers present in quote: require that they appear in the candidate text
-        quote_numbers = set(re.findall(r"\b\d+(?:\.\d+)?%?\b", clean_quote))
-        if quote_numbers and not all(n in text for n in quote_numbers):
+        quote_numbers = extract_numeric_tokens(clean_quote)
+        chunk_numbers = extract_numeric_tokens(text)
+        if quote_numbers and not quote_numbers.issubset(chunk_numbers):
             return None
 
         quote_lower = clean_quote.lower()
@@ -193,9 +206,9 @@ class QuoteVerifier:
 
         for i in range(len(sent_spans)):
             start, _, s_text, s_lower, s_set, overlap = sent_spans[i]
-            # Pre-filter using token overlap to prevent unnecessary SequenceMatcher calls
+            # Pre-filter using token overlap and numeric consistency (lazy number extraction)
             if overlap / max(q_len, 1) >= 0.35 and (
-                not quote_numbers or all(n in s_text for n in quote_numbers)
+                not quote_numbers or quote_numbers.issubset(extract_numeric_tokens(s_text))
             ):
                 r = difflib.SequenceMatcher(None, quote_lower, s_lower).ratio()
                 if r > best_ratio:
@@ -207,7 +220,8 @@ class QuoteVerifier:
                 pair_overlap = len(q_set & (s_set | next_set))
                 if pair_overlap / max(q_len, 1) >= 0.35:
                     pair_text = text[start:next_end].strip()
-                    if not quote_numbers or all(n in pair_text for n in quote_numbers):
+                    pair_nums = extract_numeric_tokens(pair_text)
+                    if not quote_numbers or quote_numbers.issubset(pair_nums):
                         r = difflib.SequenceMatcher(None, quote_lower, pair_text.lower()).ratio()
                         if r > best_ratio:
                             best_ratio = r
@@ -217,16 +231,16 @@ class QuoteVerifier:
         if (
             best_ratio >= threshold
             and best_slice
-            and (not quote_numbers or all(n in best_slice for n in quote_numbers))
+            and (not quote_numbers or quote_numbers.issubset(extract_numeric_tokens(best_slice)))
         ):
             return self._clean_boundary(best_slice, clean_quote)
 
-        # Step 2: Phrase sliding window only on the top 1 candidate sentence by token overlap
+        # Step 2: Phrase sliding window only on candidate sentences matching numbers
         candidate_spans = [
             span
             for span in sent_spans
             if span[5] / max(q_len, 1) >= 0.4
-            and (not quote_numbers or all(n in span[2] for n in quote_numbers))
+            and (not quote_numbers or quote_numbers.issubset(extract_numeric_tokens(span[2])))
         ]
         if candidate_spans:
             candidate_spans.sort(key=lambda s: s[5], reverse=True)
@@ -244,7 +258,8 @@ class QuoteVerifier:
                     c_start = w_matches[i].start()
                     c_end = w_matches[i + w - 1].end()
                     cand = s_text[c_start:c_end].strip()
-                    if quote_numbers and not all(n in cand for n in quote_numbers):
+                    cand_nums = extract_numeric_tokens(cand)
+                    if quote_numbers and not quote_numbers.issubset(cand_nums):
                         continue
                     r = difflib.SequenceMatcher(None, quote_lower, cand.lower()).ratio()
                     if r > best_ratio:
@@ -254,7 +269,7 @@ class QuoteVerifier:
         if (
             best_ratio >= threshold
             and best_slice
-            and (not quote_numbers or all(n in best_slice for n in quote_numbers))
+            and (not quote_numbers or quote_numbers.issubset(extract_numeric_tokens(best_slice)))
         ):
             return self._clean_boundary(best_slice, clean_quote)
 
@@ -279,6 +294,7 @@ class QuoteVerifier:
             )
 
         clean_quote = claim_or_quote.strip()
+        clean_quote = _BREADCRUMB_PREFIX_REGEX.sub("", clean_quote).strip()
 
         # Tier 1: exact substring match in primary chunk
         if clean_quote in primary_chunk.text:

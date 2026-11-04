@@ -354,3 +354,41 @@ def test_fuzzy_match_number_verification_rejects_hallucinated_numbers() -> None:
     res2 = verifier.verify_citation(claim_correct_year, chunk, [chunk])
     assert res2.is_verified is True
     assert res2.match_tier == "fuzzy"
+
+
+def test_fuzzy_match_rejects_comma_formatted_numbers_even_with_high_overlap() -> None:
+    chunk = make_chunk(
+        source_id=1,
+        text=(
+            "Total Data Center segment revenue for fiscal year was $49,000 million "
+            "representing substantial growth. Footnote 45 discusses international trade."
+        ),
+    )
+    verifier = QuoteVerifier()
+
+    # Quote has $45,000 while sentence has $49,000. Even though '45' is in the footnote,
+    # the sentence itself does not have 45000, so it must be rejected!
+    claim_wrong_revenue = (
+        "Total Data Center segment revenue for fiscal year was $45,000 million "
+        "representing substantial growth."
+    )
+    res = verifier.verify_citation(claim_wrong_revenue, chunk, [chunk])
+    assert res.is_verified is False
+
+
+def test_verifier_strips_breadcrumb_headers_before_matching() -> None:
+    chunk = make_chunk(
+        source_id=1,
+        text="Data Center revenue was $47.5 billion, up 217% from a year ago.",
+    )
+    verifier = QuoteVerifier()
+
+    # The LLM copied the injected breadcrumb header into its quote
+    quote_with_breadcrumb = (
+        "[Document: NVIDIA 2024 10-K | Section: 2. Financial Results | Page: 3] "
+        "Data Center revenue was $47.5 billion, up 217% from a year ago."
+    )
+    res = verifier.verify_citation(quote_with_breadcrumb, chunk, [chunk])
+    assert res.is_verified is True
+    assert res.match_tier == "exact"
+    assert res.verified_quote == "Data Center revenue was $47.5 billion, up 217% from a year ago."

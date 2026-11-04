@@ -84,6 +84,16 @@ async def ingest_document(
         doc_title = parsed_doc.title or filename
         total_pages = parsed_doc.total_pages
 
+        # Extract document-level structural metadata from parser
+        table_count = sum(1 for el in parsed_doc.elements if el.element_type == "table")
+        heading_count = sum(1 for el in parsed_doc.elements if el.element_type == "heading")
+        extra_metadata = {
+            "table_count": table_count,
+            "heading_count": heading_count,
+            "total_structural_elements": len(parsed_doc.elements),
+            "parser": "PDFLayoutParser",
+        }
+
         # 3. Create Document record in DB
         doc = await doc_repo.create(
             DocumentCreate(
@@ -93,6 +103,7 @@ async def ingest_document(
                 category=category,
                 file_hash=file_hash,
                 total_pages=total_pages,
+                extra_metadata=extra_metadata,
             )
         )
 
