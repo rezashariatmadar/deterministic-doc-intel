@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_db, get_embedding
 from app.core.config import get_settings
-from app.core.exceptions import DocumentNotFoundError
+from app.core.exceptions import AppException, DocumentNotFoundError
 from app.db.repositories.chunk_repo import ChunkRepository
 from app.db.repositories.document_repo import DocumentRepository
 from app.schemas.document import ChunkCreate, DocumentCreate, DocumentRead
@@ -156,6 +156,17 @@ async def ingest_document(
         assert updated_doc is not None
         return DocumentRead.model_validate(updated_doc)
 
+    except AppException as exc:
+        if doc is not None:
+            await doc_repo.update_status(
+                doc_id=doc.id,
+                status="FAILED",
+                error_message=str(exc),
+            )
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=f"Document ingestion failed: {exc.message}",
+        ) from exc
     except Exception as exc:
         if doc is not None:
             await doc_repo.update_status(

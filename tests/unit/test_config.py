@@ -154,4 +154,3 @@ def test_cors_configuration_validity():
             origins = kwargs.get("allow_origins", [])
             assert isinstance(origins, list)
             assert not ("*" in origins and kwargs.get("allow_credentials") is True)
-

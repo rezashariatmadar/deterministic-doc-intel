@@ -173,6 +173,7 @@ def test_factory_creates_expected_providers() -> None:
 
 def test_local_embedding_provider_respects_settings_model() -> None:
     from app.core.config import get_settings
+
     settings = get_settings()
     provider = get_embedding_provider(provider_type="local")
     assert provider.model_name == settings.EMBEDDING_MODEL
@@ -254,4 +255,3 @@ async def test_gemini_llm_provider_generate_and_stream() -> None:
         )
         stream_tokens = [tok async for tok in provider.generate_stream(prompt="Question")]
         assert "".join(stream_tokens) == "Data Center revenue"
-

@@ -36,10 +36,9 @@ class ChunkRepository:
             )
             for c in chunks_in
         ]
-        self.session.add_all(records)
-        await self.session.commit()
-        for r in records:
-            await self.session.refresh(r)
+        if records:
+            self.session.add_all(records)
+            await self.session.commit()
         return records
 
     async def search_similar(

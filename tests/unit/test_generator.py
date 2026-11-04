@@ -333,6 +333,3 @@ async def test_rag_response_downgrades_when_all_citations_fail(
     assert res.confidence_score == 0.0
     assert len(res.citations) == 0
     assert "[unverified: 1]" in res.answer
-
-
-

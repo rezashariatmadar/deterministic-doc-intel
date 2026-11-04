@@ -203,6 +203,7 @@ async def test_ingestion_failure_updates_status_and_allows_reingestion(
     api_client: AsyncClient,
 ) -> None:
     from unittest.mock import AsyncMock
+
     pdf_path = "data/raw_corpus/nvidia_10k_sample.pdf"
     assert os.path.exists(pdf_path)
 
@@ -249,3 +250,17 @@ async def test_ingestion_failure_updates_status_and_allows_reingestion(
     del_resp = await api_client.delete(f"/api/v1/documents/{repaired_doc['id']}")
     assert del_resp.status_code in [200, 204]
 
+
+@pytest.mark.asyncio
+async def test_ingest_corrupted_file_returns_422_not_500(
+    api_client: AsyncClient,
+) -> None:
+    corrupted_data = b"This is not a valid PDF binary header at all."
+    resp = await api_client.post(
+        "/api/v1/documents/ingest",
+        files={"file": ("corrupt.pdf", corrupted_data, "application/pdf")},
+        data={"category": "financial_report"},
+    )
+    assert resp.status_code == 422
+    detail = resp.json().get("detail", "")
+    assert "Document ingestion failed" in detail or "Failed to open" in detail

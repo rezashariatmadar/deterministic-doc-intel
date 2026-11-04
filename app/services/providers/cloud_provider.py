@@ -294,4 +294,3 @@ class GeminiLLMProvider(LLMProvider):
                                     yield text_piece
                     except json.JSONDecodeError:
                         continue
-

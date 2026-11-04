@@ -24,3 +24,12 @@ def test_clean_text_normalizes_unicode_quotes() -> None:
 def test_normalize_table_cell() -> None:
     assert normalize_table_cell("  $47,525 \n ") == "$47,525"
     assert normalize_table_cell("|") == "\\|"
+
+
+def test_normalize_table_cell_strips_null_bytes_and_control_chars() -> None:
+    dirty_cell = "\x00$47,525\x0b \x0cmillion\x00"
+    cleaned = normalize_table_cell(dirty_cell)
+    assert "\x00" not in cleaned
+    assert "\x0b" not in cleaned
+    assert "\x0c" not in cleaned
+    assert cleaned == "$47,525 million"

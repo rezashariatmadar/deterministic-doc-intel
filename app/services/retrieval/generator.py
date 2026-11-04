@@ -29,9 +29,7 @@ class GroundedGenerator:
         quote_verifier: QuoteVerifier | None = None,
     ) -> None:
         self.llm_provider = llm_provider
-        self.quote_verifier = (
-            quote_verifier if quote_verifier is not None else QuoteVerifier()
-        )
+        self.quote_verifier = quote_verifier if quote_verifier is not None else QuoteVerifier()
 
     def build_context_xml(self, chunks: list[RetrievedChunk]) -> str:
         """Format retrieved chunks into structured XML with clear source IDs."""
@@ -70,9 +68,7 @@ class GroundedGenerator:
         for i, m in enumerate(matches):
             orig_source_id = int(m.group(1))
             prev_end = matches[i - 1].end() if i > 0 else 0
-            next_start = (
-                matches[i + 1].start() if i + 1 < len(matches) else len(raw_answer)
-            )
+            next_start = matches[i + 1].start() if i + 1 < len(matches) else len(raw_answer)
 
             # Extract preceding text back to sentence/paragraph boundary
             preceding = raw_answer[prev_end : m.start()]
@@ -124,9 +120,7 @@ class GroundedGenerator:
                     # Strip trailing citations and any separating punctuation or whitespace
                     stripped_before = re.sub(r"(\[\d+\][\s,;:-]*)+$", "", text_before)
                     boundaries = [0]
-                    for bm in re.finditer(
-                        r"[\r\n]+|(?<!\d)(?<=[.!?])\s+", stripped_before
-                    ):
+                    for bm in re.finditer(r"[\r\n]+|(?<!\d)(?<=[.!?])\s+", stripped_before):
                         boundaries.append(bm.end())
                     boundaries.append(len(stripped_before))
                     sents = [
@@ -156,8 +150,8 @@ class GroundedGenerator:
             # Check for paired inner quotes (double or curly quotes; avoid contractions)
             quote_match = (
                 re.search(r'"([^"]{3,})"', claim_text)
-                or re.search(r'“([^”]{3,})”', claim_text)
-                or re.search(r'‘([^’]{3,})’', claim_text)
+                or re.search(r"“([^”]{3,})”", claim_text)
+                or re.search(r"‘([^’]{3,})’", claim_text)
             )
             inner_quote = quote_match.group(1).strip() if quote_match else None
 
@@ -165,13 +159,9 @@ class GroundedGenerator:
                 primary_chunk = chunk_map[orig_source_id]
                 res = None
                 if inner_quote:
-                    res = self.quote_verifier.verify_citation(
-                        inner_quote, primary_chunk, chunks
-                    )
+                    res = self.quote_verifier.verify_citation(inner_quote, primary_chunk, chunks)
                 if not res or not res.is_verified:
-                    res = self.quote_verifier.verify_citation(
-                        claim_text, primary_chunk, chunks
-                    )
+                    res = self.quote_verifier.verify_citation(claim_text, primary_chunk, chunks)
             else:
                 res = None
 

@@ -302,9 +302,7 @@ class DocumentChunker:
         last_el = (
             elements[-1]
             if elements
-            else StructuralElement(
-                element_type="prose", text=overlap_text, page_number=last_page
-            )
+            else StructuralElement(element_type="prose", text=overlap_text, page_number=last_page)
         )
         overlap_el = StructuralElement(
             element_type="prose",
@@ -465,7 +463,34 @@ class DocumentChunker:
         """Split oversized prose text along sentence boundaries with token budgeting."""
         chunk_metadata = self._copy_metadata(metadata)
         # Simple sentence splitter
-        sentences = re.split(r"(?<=[.!?])\s+", text)
+        raw_sentences = re.split(r"(?<=[.!?])\s+", text)
+        sentences: list[str] = []
+        step_budget = (
+            max(1, self.target_tokens - self.overlap_tokens)
+            if self.overlap_tokens
+            else self.target_tokens
+        )
+        for s in raw_sentences:
+            s_clean = s.strip()
+            if not s_clean:
+                continue
+            if self.count_tokens(s_clean) <= step_budget:
+                sentences.append(s_clean)
+            else:
+                # Decompose oversized sentence into word-based chunks that fit within step_budget
+                words = s_clean.split()
+                sub_buf: list[str] = []
+                for w in words:
+                    cand_words = " ".join([*sub_buf, w])
+                    if self.count_tokens(cand_words) <= step_budget:
+                        sub_buf.append(w)
+                    else:
+                        if sub_buf:
+                            sentences.append(" ".join(sub_buf))
+                        sub_buf = [w]
+                if sub_buf:
+                    sentences.append(" ".join(sub_buf))
+
         chunks: list[DocumentChunkDraft] = []
         curr_sentences: list[str] = []
         curr_idx = start_chunk_idx
@@ -501,7 +526,10 @@ class DocumentChunker:
                         overlap_s = self.tokenizer.decode(toks[-self.overlap_tokens :]).strip()
                     else:
                         overlap_s = raw_chunk
-                    curr_sentences = [overlap_s, s_clean]
+                    if self.count_tokens(f"{overlap_s} {s_clean}") <= self.target_tokens:
+                        curr_sentences = [overlap_s, s_clean]
+                    else:
+                        curr_sentences = [s_clean]
                 else:
                     curr_sentences = [s_clean]
 

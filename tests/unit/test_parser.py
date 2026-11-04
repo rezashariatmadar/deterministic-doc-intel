@@ -2,6 +2,10 @@
 
 from pathlib import Path
 
+import pymupdf as fitz
+import pytest
+
+from app.core.exceptions import DocumentParsingError
 from app.services.ingestion.parser import ParsedDocument, PDFLayoutParser
 
 
@@ -55,3 +59,42 @@ def test_parser_extracts_bbox_and_block_index(sample_pdf_path: Path) -> None:
     assert bbox["x1"] > bbox["x0"]
     assert "block_index" in first.metadata
     assert isinstance(first.metadata["block_index"], int)
+
+
+def test_parser_preserves_paragraph_cohesion_and_hyphenation() -> None:
+    parser = PDFLayoutParser()
+    block = (
+        0,
+        0,
+        100,
+        100,
+        "This is an oper-\nating expense and capital investment\nfor data center computing.",
+        0,
+        0,
+    )
+    parsed = parser.parse_text_blocks([block])
+    assert len(parsed.elements) == 1
+    el = parsed.elements[0]
+    assert el.element_type == "prose"
+    assert "operating" in el.text
+    assert "\n\n" not in el.text
+
+
+def test_parser_rejects_password_protected_pdf(tmp_path: Path) -> None:
+    # Create an encrypted PDF requiring a password
+    pdf_path = tmp_path / "encrypted.pdf"
+    doc = fitz.open()
+    doc.new_page()
+    doc.save(
+        str(pdf_path),
+        encryption=fitz.PDF_ENCRYPT_AES_256,
+        user_pw="secret123",
+        owner_pw="master123",
+    )
+    doc.close()
+
+    parser = PDFLayoutParser()
+    with pytest.raises(DocumentParsingError) as exc_info:
+        parser.parse(pdf_path)
+    err = str(exc_info.value).lower()
+    assert "password-protected" in err or "encrypted" in err

@@ -66,6 +66,13 @@ class PDFLayoutParser:
                 filename=pdf_path.name,
             ) from e
 
+        if doc.needs_pass:
+            doc.close()
+            raise DocumentParsingError(
+                "PDF is password-protected or encrypted.",
+                filename=pdf_path.name,
+            )
+
         try:
             total_pages = len(doc)
             elements: list[StructuralElement] = []
@@ -161,6 +168,31 @@ class PDFLayoutParser:
             copied["bbox"] = dict(copied["bbox"])
         return copied
 
+    def _create_prose_element(
+        self,
+        lines: list[str],
+        page_num: int,
+        block_metadata: dict[str, Any],
+    ) -> StructuralElement | None:
+        """Create a single cohesive prose element from lines, normalizing hyphenation."""
+        if not lines:
+            return None
+        joined = "\n".join(lines)
+        cleaned = clean_text(joined)
+        sub_lines = cleaned.splitlines()
+        is_list = any(sl.strip().startswith(("-", "*", "•", "1.", "2.")) for sl in sub_lines)
+        if not is_list:
+            cleaned = " ".join(sub_lines)
+        if not cleaned:
+            return None
+        return StructuralElement(
+            element_type="prose",
+            text=cleaned,
+            page_number=page_num,
+            heading_level=0,
+            metadata=self._copy_metadata(block_metadata),
+        )
+
     def _process_page_blocks(
         self,
         blocks: list[Any],
@@ -199,14 +231,20 @@ class PDFLayoutParser:
                     )
                 continue
 
-            # 2. Split block into lines to detect headings vs prose
+            # 2. Process block lines: accumulate cohesive prose paragraphs and detect headings
             lines = [line.strip() for line in block_text.splitlines() if line.strip()]
+            prose_lines: list[str] = []
+
             for line in lines:
                 # Skip repeating header/footer line-level
                 if self.REPETITIVE_HEADER_FOOTER_REGEX.match(line):
                     continue
 
                 if self.HEADING_H1_REGEX.match(line):
+                    prose_el = self._create_prose_element(prose_lines, page_num, block_metadata)
+                    if prose_el:
+                        page_elements.append(prose_el)
+                    prose_lines.clear()
                     page_elements.append(
                         StructuralElement(
                             element_type="heading",
@@ -217,6 +255,10 @@ class PDFLayoutParser:
                         )
                     )
                 elif self.HEADING_H2_REGEX.match(line):
+                    prose_el = self._create_prose_element(prose_lines, page_num, block_metadata)
+                    if prose_el:
+                        page_elements.append(prose_el)
+                    prose_lines.clear()
                     page_elements.append(
                         StructuralElement(
                             element_type="heading",
@@ -227,18 +269,11 @@ class PDFLayoutParser:
                         )
                     )
                 else:
-                    # Regular prose or list element
-                    cleaned_line = clean_text(line)
-                    if cleaned_line:
-                        page_elements.append(
-                            StructuralElement(
-                                element_type="prose",
-                                text=cleaned_line,
-                                page_number=page_num,
-                                heading_level=0,
-                                metadata=self._copy_metadata(block_metadata),
-                            )
-                        )
+                    prose_lines.append(line)
+
+            prose_el = self._create_prose_element(prose_lines, page_num, block_metadata)
+            if prose_el:
+                page_elements.append(prose_el)
 
         return page_elements
 

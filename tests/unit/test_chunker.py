@@ -163,3 +163,19 @@ def test_chunker_sliding_window_prose_overlap() -> None:
     common = words_chunk0.intersection(words_chunk1)
     assert len(common) > 0
 
+
+def test_chunker_splits_oversized_sentence_without_punctuation() -> None:
+    # 300 words without a single period or question mark
+    unbroken_text = "word " * 300
+    el = StructuralElement(
+        element_type="prose",
+        text=unbroken_text.strip(),
+        page_number=1,
+    )
+    doc = ParsedDocument(title="Runaway Sentence Doc", total_pages=1, elements=[el])
+    chunker = DocumentChunker(target_tokens=50, overlap_tokens=10)
+    chunks = chunker.chunk_document(doc)
+
+    assert len(chunks) > 1, "Must split oversized sentence into multiple chunks"
+    for c in chunks:
+        assert c.token_count <= 50, f"Chunk {c.chunk_index} exceeded target tokens: {c.token_count}"

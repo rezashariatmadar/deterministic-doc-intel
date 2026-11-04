@@ -64,8 +64,11 @@ def normalize_table_cell(cell: str) -> str:
     """Normalize a table cell text, stripping whitespace and escaping markdown pipes."""
     if not cell:
         return ""
+    # Strip null bytes and non-printable control characters
+    cleaned = CONTROL_CHARACTERS_REGEX.sub("", cell)
+    cleaned = unicodedata.normalize("NFKC", cleaned)
     # Replace internal newlines with spaces and clean whitespace
-    normalized = " ".join(cell.split())
+    normalized = " ".join(cleaned.split())
     # Escape pipe characters so they don't break markdown tables
     normalized = normalized.replace("|", r"\|")
     return normalized

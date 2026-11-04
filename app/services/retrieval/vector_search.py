@@ -64,9 +64,7 @@ class VectorSearchService:
 
         # 4. Map to enriched RetrievedChunk schemas enforcing context token budget
         results: list[RetrievedChunk] = []
-        token_ceiling = (
-            max_tokens if max_tokens is not None else self.settings.MAX_CONTEXT_TOKENS
-        )
+        token_ceiling = max_tokens if max_tokens is not None else self.settings.MAX_CONTEXT_TOKENS
         accumulated_tokens = 0
 
         for chunk, score in matched_chunks:
