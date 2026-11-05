@@ -24,10 +24,24 @@ _BREADCRUMB_PREFIX_REGEX = re.compile(
 )
 
 
+# Precompiled pattern for numeric tokens preserving signs, suffixes, and decimals
+_NUMERIC_TOKEN_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9_])([+-]?\d+(?:[.,]\d+)*(?:[kKmMbBtT]|%)?)(?![A-Za-z0-9_])"
+)
+
+
 def extract_numeric_tokens(text: str) -> set[str]:
-    """Extract normalized numeric tokens (commas removed, decimals preserved)."""
-    raw_nums = re.findall(r"\b\d+(?:[.,]\d+)*%?\b", text)
-    return {n.replace(",", "").rstrip("%") for n in raw_nums if any(c.isdigit() for c in n)}
+    """Extract normalized numeric tokens (commas removed, decimals and financial/percentage suffixes preserved)."""
+    raw_nums = _NUMERIC_TOKEN_PATTERN.findall(text)
+    tokens: set[str] = set()
+    for n in raw_nums:
+        clean_n = n.replace(",", "").lower()
+        if any(c.isdigit() for c in clean_n):
+            tokens.add(clean_n)
+            base = re.sub(r"[kmb%]$", "", clean_n)
+            if base != clean_n and base:
+                tokens.add(base)
+    return tokens
 
 
 def normalize_with_mapping(text: str) -> tuple[str, list[int]]:
@@ -53,16 +67,37 @@ def normalize_with_mapping(text: str) -> tuple[str, list[int]]:
     mapping: list[int] = []
     in_whitespace = False
 
+    is_pure_ascii = text.isascii()
+
     for idx, char in enumerate(text):
         if idx in skip_indices:
             continue
 
-        # Normalize NFKC characters (e.g. ligatures)
-        norm_chars = unicodedata.normalize("NFKC", char)
+        # Preserve '-' or '+' when immediately preceding a digit (e.g. "-32%", "+15%")
+        is_attached_sign = False
+        if char in ("-", "−", "+"):
+            j = idx + 1
+            while j < len(text) and text[j].isspace():
+                j += 1
+            if j < len(text) and text[j].isdigit():
+                is_attached_sign = True
+
+        if is_pure_ascii:
+            norm_chars = char
+        else:
+            norm_chars = unicodedata.normalize("NFKC", char)
+
         for nc in norm_chars:
+            if is_attached_sign and nc in ("-", "−", "+"):
+                sign_char = "-" if nc in ("-", "−") else "+"
+                chars.append(sign_char)
+                mapping.append(idx)
+                in_whitespace = False
+                continue
+
             is_punct = nc not in _QUANTITATIVE_SYMBOLS and (
                 nc in string.punctuation
-                or unicodedata.category(nc).startswith("P")
+                or (not is_pure_ascii and unicodedata.category(nc).startswith("P"))
                 or nc in _EXTRA_PUNCTUATION
             )
             if is_punct or nc.isspace():
@@ -71,10 +106,9 @@ def normalize_with_mapping(text: str) -> tuple[str, list[int]]:
                     mapping.append(idx)
                     in_whitespace = True
             else:
-                folded = nc.casefold()
+                folded = nc.lower() if is_pure_ascii else nc.casefold()
                 for fc in folded:
-                    # Skip non-spacing combining marks (e.g. dot above \u0307 in Turkish 'İ')
-                    if unicodedata.category(fc) == "Mn":
+                    if not is_pure_ascii and unicodedata.category(fc) == "Mn":
                         continue
                     chars.append(fc)
                     mapping.append(idx)
@@ -137,9 +171,20 @@ class QuoteVerifier:
         if clean_quote.isascii() and text.isascii():
             quote_lower = clean_quote.lower()
             text_lower = text.lower()
-            pos = text_lower.find(quote_lower)
-            if pos != -1:
-                return text[pos : pos + len(clean_quote)]
+            pos = 0
+            while True:
+                pos = text_lower.find(quote_lower, pos)
+                if pos == -1:
+                    break
+                end = pos + len(clean_quote)
+                is_num_cont = False
+                if end < len(text) and (text[end].isdigit() or (text[end] in (".", ",") and end + 1 < len(text) and text[end + 1].isdigit())):
+                    is_num_cont = True
+                if pos > 0 and text[pos - 1].isdigit():
+                    is_num_cont = True
+                if not is_num_cont:
+                    return text[pos:end]
+                pos += 1
 
         # Path 2: full normalization with character position mapping
         norm_quote = normalize_for_matching(clean_quote)
@@ -150,11 +195,21 @@ class QuoteVerifier:
         if not norm_text or not char_map:
             return None
 
-        norm_pos = norm_text.find(norm_quote)
-        if norm_pos != -1:
+        norm_pos = 0
+        while True:
+            norm_pos = norm_text.find(norm_quote, norm_pos)
+            if norm_pos == -1:
+                break
             start_orig = char_map[norm_pos]
             end_orig = char_map[norm_pos + len(norm_quote) - 1] + 1
-            return text[start_orig:end_orig]
+            is_num_cont = False
+            if end_orig < len(text) and (text[end_orig].isdigit() or (text[end_orig] in (".", ",") and end_orig + 1 < len(text) and text[end_orig + 1].isdigit())):
+                is_num_cont = True
+            if start_orig > 0 and text[start_orig - 1].isdigit():
+                is_num_cont = True
+            if not is_num_cont:
+                return text[start_orig:end_orig]
+            norm_pos += 1
 
         return None
 
@@ -171,9 +226,14 @@ class QuoteVerifier:
 
         # Verify numbers present in quote: require that they appear in the candidate text
         quote_numbers = extract_numeric_tokens(clean_quote)
-        chunk_numbers = extract_numeric_tokens(text)
-        if quote_numbers and not quote_numbers.issubset(chunk_numbers):
-            return None
+        if quote_numbers:
+            # Fast rejection string check before full regex tokenization on chunk text
+            text_lower_nocomma = text.lower().replace(",", "")
+            if not all(num in text_lower_nocomma for num in quote_numbers):
+                return None
+            chunk_numbers = extract_numeric_tokens(text)
+            if not quote_numbers.issubset(chunk_numbers):
+                return None
 
         quote_lower = clean_quote.lower()
         q_words = re.findall(r"\w+", quote_lower)
@@ -251,7 +311,7 @@ class QuoteVerifier:
             w_matches = list(re.finditer(r"\S+", s_text))
             num_w = len(w_matches)
             min_w = max(1, q_len - 3)
-            max_w = min(num_w, q_len + 4)
+            max_w = min(num_w, max(q_len + 6, int(q_len * 2.0)))
 
             for w in range(min_w, max_w + 1):
                 for i in range(num_w - w + 1):
@@ -266,8 +326,9 @@ class QuoteVerifier:
                         best_ratio = r
                         best_slice = cand
 
+        effective_threshold = threshold if not quote_numbers else min(threshold, 0.65)
         if (
-            best_ratio >= threshold
+            best_ratio >= effective_threshold
             and best_slice
             and (not quote_numbers or quote_numbers.issubset(extract_numeric_tokens(best_slice)))
         ):
@@ -296,8 +357,25 @@ class QuoteVerifier:
         clean_quote = claim_or_quote.strip()
         clean_quote = _BREADCRUMB_PREFIX_REGEX.sub("", clean_quote).strip()
 
-        # Tier 1: exact substring match in primary chunk
-        if clean_quote in primary_chunk.text:
+        # Tier 1: exact substring match in primary chunk with boundary check
+        pos = 0
+        found_exact = False
+        while True:
+            pos = primary_chunk.text.find(clean_quote, pos)
+            if pos == -1:
+                break
+            end = pos + len(clean_quote)
+            is_num_cont = False
+            if end < len(primary_chunk.text) and (primary_chunk.text[end].isdigit() or (primary_chunk.text[end] in (".", ",") and end + 1 < len(primary_chunk.text) and primary_chunk.text[end + 1].isdigit())):
+                is_num_cont = True
+            if pos > 0 and primary_chunk.text[pos - 1].isdigit():
+                is_num_cont = True
+            if not is_num_cont:
+                found_exact = True
+                break
+            pos += 1
+
+        if found_exact:
             return VerificationResult(
                 is_verified=True,
                 verified_quote=clean_quote,

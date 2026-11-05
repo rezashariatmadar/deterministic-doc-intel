@@ -392,3 +392,28 @@ def test_verifier_strips_breadcrumb_headers_before_matching() -> None:
     assert res.is_verified is True
     assert res.match_tier == "exact"
     assert res.verified_quote == "Data Center revenue was $47.5 billion, up 217% from a year ago."
+
+
+def test_numeric_token_extraction_units_and_signs() -> None:
+    from app.services.retrieval.verifier import extract_numeric_tokens
+    tokens = extract_numeric_tokens("Earned $100M, $47.5B, -32% margin, +15% growth, $47,525M.")
+    assert "100m" in tokens
+    assert "47.5b" in tokens
+    assert "-32%" in tokens
+    assert "+15%" in tokens
+    assert "47525m" in tokens
+
+
+def test_sign_inversion_rejected() -> None:
+    chunk = make_chunk(1, "Operating margin was -32% in fiscal 2024.")
+    verifier = QuoteVerifier()
+    res = verifier.verify_citation("Operating margin was +32% in fiscal 2024", chunk, [chunk])
+    assert not res.is_verified
+
+
+def test_partial_number_substring_rejected() -> None:
+    chunk = make_chunk(1, "Total revenue rose to $47500 million.")
+    verifier = QuoteVerifier()
+    res = verifier.verify_citation("Total revenue rose to $47", chunk, [chunk])
+    assert not res.is_verified
+
