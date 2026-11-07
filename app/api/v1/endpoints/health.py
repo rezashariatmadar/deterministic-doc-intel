@@ -1,7 +1,7 @@
 """Health check endpoint verifying database and Redis connectivity."""
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,8 +12,17 @@ router = APIRouter()
 settings = get_settings()
 
 
+def determine_health_status(db_status: str, redis_status: str) -> tuple[str, int]:
+    """Determine overall health status string and corresponding HTTP status code."""
+    is_healthy = db_status == "connected" and redis_status == "connected"
+    status_str = "healthy" if is_healthy else "degraded"
+    http_code = status.HTTP_200_OK if is_healthy else status.HTTP_503_SERVICE_UNAVAILABLE
+    return status_str, http_code
+
+
 @router.get("/health")
 async def health_check(
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
     """Check connectivity to PostgreSQL and Redis Stack."""
@@ -33,9 +42,8 @@ async def health_check(
     except Exception:
         redis_status = "disconnected"
 
-    overall_status = (
-        "healthy" if db_status == "connected" and redis_status == "connected" else "degraded"
-    )
+    overall_status, http_code = determine_health_status(db_status, redis_status)
+    response.status_code = http_code
 
     return {
         "status": overall_status,

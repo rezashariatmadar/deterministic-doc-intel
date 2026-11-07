@@ -65,6 +65,11 @@ async def ingest_document(
         if existing_doc.status == "COMPLETED":
             response.status_code = status.HTTP_200_OK
             return DocumentRead.model_validate(existing_doc)
+        if existing_doc.status in ("PENDING", "PROCESSING"):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Document ingestion is currently in progress (status: {existing_doc.status}).",
+            )
         # Previous attempt failed or was incomplete; purge it to reprocess cleanly
         await doc_repo.delete(existing_doc.id)
 
@@ -158,6 +163,7 @@ async def ingest_document(
 
     except AppException as exc:
         if doc is not None:
+            await db.rollback()
             await doc_repo.update_status(
                 doc_id=doc.id,
                 status="FAILED",
@@ -169,6 +175,7 @@ async def ingest_document(
         ) from exc
     except Exception as exc:
         if doc is not None:
+            await db.rollback()
             await doc_repo.update_status(
                 doc_id=doc.id,
                 status="FAILED",

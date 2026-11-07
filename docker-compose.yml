@@ -3,7 +3,8 @@ services:
     image: pgvector/pgvector:pg16
     container_name: rag_postgres
     restart: unless-stopped
-    network_mode: host
+    ports:
+      - "5432:5432"
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -21,7 +22,8 @@ services:
     image: redis/redis-stack-server:latest
     container_name: rag_redis
     restart: unless-stopped
-    network_mode: host
+    ports:
+      - "6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -36,10 +38,11 @@ services:
       dockerfile: Dockerfile
     container_name: rag_api
     restart: unless-stopped
-    network_mode: host
+    ports:
+      - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/rag_db
-      - REDIS_URL=redis://localhost:6379/0
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/rag_db
+      - REDIS_URL=redis://redis:6379/0
       - EMBEDDING_PROVIDER=local
       - LLM_PROVIDER=local
     depends_on:

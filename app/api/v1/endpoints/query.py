@@ -56,6 +56,8 @@ async def stream_query_rag(
         filters=request.filters,
         top_k=request.top_k,
     )
+    # Release DB connection immediately so connection pool is not starved during LLM streaming
+    await db.close()
 
     generator = GroundedGenerator(llm_provider=llm_provider)
     stream_gen = generator.generate_stream(query=request.query, chunks=chunks)
@@ -94,11 +96,14 @@ async def stream_query_rag(
                 "page_end": c.page_end,
                 "section_path": c.section_path,
                 "supporting_quote": c.supporting_quote,
+                "bbox": c.bbox,
+                "metadata": c.metadata,
             }
             for c in rag_response.citations
         ]
         verification_payload = {
             "is_answerable": rag_response.is_answerable,
+            "verified_answer": rag_response.answer,
             "citations": citations_payload,
             "confidence_score": rag_response.confidence_score,
             "has_unverified": "[unverified:" in rag_response.answer,
