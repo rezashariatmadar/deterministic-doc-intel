@@ -22,6 +22,7 @@ class ChunkRepository:
         records = [
             DocumentChunk(
                 document_id=c.document_id,
+                parent_chunk_id=c.parent_chunk_id,
                 chunk_index=c.chunk_index,
                 raw_text=c.raw_text,
                 contextualized_text=c.contextualized_text,

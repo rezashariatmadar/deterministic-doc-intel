@@ -12,6 +12,7 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from app.db.models.chunk import DocumentChunk
+    from app.db.models.parent_chunk import ParentChunk
 
 
 class Document(Base):
@@ -68,4 +69,10 @@ class Document(Base):
         back_populates="document",
         cascade="all, delete-orphan",
         order_by="DocumentChunk.chunk_index",
+    )
+    parent_chunks: Mapped[list["ParentChunk"]] = relationship(
+        "ParentChunk",
+        back_populates="document",
+        cascade="all, delete-orphan",
+        order_by="ParentChunk.parent_index",
     )

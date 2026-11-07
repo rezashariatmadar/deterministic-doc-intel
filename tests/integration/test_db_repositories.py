@@ -92,3 +92,85 @@ async def test_document_and_chunk_lifecycle(db_session):
         await doc_repo.delete(doc.id)
         deleted = await doc_repo.get_by_id(doc.id)
         assert deleted is None
+
+
+@pytest.mark.asyncio
+async def test_parent_chunk_and_search_vector_generation(db_session):
+    from sqlalchemy import select
+    from app.db.models.chunk import DocumentChunk
+    from app.db.models.parent_chunk import ParentChunk
+
+    settings = get_settings()
+    doc_repo = DocumentRepository(db_session)
+    chunk_repo = ChunkRepository(db_session)
+
+    unique_hash = (uuid.uuid4().hex + uuid.uuid4().hex)[:64]
+    doc = await doc_repo.create(
+        DocumentCreate(
+            filename="test_hierarchical.pdf",
+            file_hash=unique_hash,
+            title="NVIDIA 10-K Hierarchical",
+            total_pages=5,
+        )
+    )
+
+    try:
+        # 1. Insert parent chunk
+        parent = ParentChunk(
+            document_id=doc.id,
+            parent_index=0,
+            raw_text="Full Section: Data Center revenue surged due to accelerated computing demand.",
+            contextualized_text="[Doc: NVIDIA 10-K] Full Section: Data Center revenue surged.",
+            token_count=100,
+            page_start=1,
+            page_end=2,
+            section_path="Item 7 > Overview",
+            chunk_metadata={"section": "overview"},
+        )
+        db_session.add(parent)
+        await db_session.commit()
+        await db_session.refresh(parent)
+        assert parent.id is not None
+
+        # 2. Insert child chunk linked to parent_chunk_id
+        dim = settings.EMBEDDING_DIMENSION
+        vec = [0.1] * dim
+        child_chunks = await chunk_repo.bulk_create(
+            [
+                ChunkCreate(
+                    document_id=doc.id,
+                    chunk_index=0,
+                    parent_chunk_id=parent.id,
+                    raw_text="Data Center revenue surged.",
+                    contextualized_text="[Doc: NVIDIA 10-K] Data Center revenue surged.",
+                    token_count=10,
+                    page_start=1,
+                    page_end=1,
+                    section_path="Item 7 > Overview",
+                    element_type="prose",
+                    embedding_model=settings.EMBEDDING_MODEL,
+                    embedding=vec,
+                )
+            ]
+        )
+        assert len(child_chunks) == 1
+        assert child_chunks[0].parent_chunk_id == parent.id
+
+        # 3. Verify search_vector was generated automatically in PostgreSQL
+        stmt = select(DocumentChunk).where(DocumentChunk.id == child_chunks[0].id)
+        result = await db_session.execute(stmt)
+        saved_chunk = result.scalar_one()
+
+        assert saved_chunk.search_vector is not None
+        # TSVECTOR string representation in Postgres contains stemmed lexemes like 'center', 'revenu', 'surg'
+        sv_str = str(saved_chunk.search_vector)
+        assert "center" in sv_str
+        assert "revenu" in sv_str
+
+    finally:
+        await doc_repo.delete(doc.id)
+        # Verify cascade deletion of parent chunk
+        parent_stmt = select(ParentChunk).where(ParentChunk.id == parent.id)
+        parent_res = await db_session.execute(parent_stmt)
+        assert parent_res.scalar_one_or_none() is None
+

@@ -35,6 +35,7 @@ class DocumentRead(DocumentBase):
 
 class ChunkBase(BaseModel):
     chunk_index: int = Field(..., ge=0)
+    parent_chunk_id: UUID | None = Field(default=None)
     raw_text: str = Field(..., min_length=1)
     contextualized_text: str = Field(..., min_length=1)
     token_count: int = Field(..., gt=0)

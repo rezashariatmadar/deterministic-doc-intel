@@ -5,8 +5,8 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, func
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import Computed, DateTime, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.config import get_settings
@@ -14,6 +14,7 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from app.db.models.document import Document
+    from app.db.models.parent_chunk import ParentChunk
 
 settings = get_settings()
 
@@ -34,12 +35,23 @@ class DocumentChunk(Base):
         nullable=False,
         index=True,
     )
+    parent_chunk_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("parent_chunks.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     raw_text: Mapped[str] = mapped_column(Text, nullable=False)
     contextualized_text: Mapped[str] = mapped_column(
         Text,
         nullable=False,
         comment="Text with prepended document and section hierarchy breadcrumbs",
+    )
+    search_vector: Mapped[Any] = mapped_column(
+        TSVECTOR,
+        Computed("to_tsvector('english', contextualized_text)", persisted=True),
+        nullable=False,
     )
     token_count: Mapped[int] = mapped_column(Integer, nullable=False)
     page_start: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
@@ -78,6 +90,10 @@ class DocumentChunk(Base):
 
     # Relationship back to parent document
     document: Mapped["Document"] = relationship("Document", back_populates="chunks")
+    parent_chunk: Mapped["ParentChunk | None"] = relationship(
+        "ParentChunk",
+        back_populates="child_chunks",
+    )
 
     __table_args__ = (
         # HNSW Index for sub-millisecond approximate nearest neighbor cosine search
@@ -92,6 +108,12 @@ class DocumentChunk(Base):
         Index(
             "ix_document_chunks_metadata_gin",
             "metadata",
+            postgresql_using="gin",
+        ),
+        # GIN index for full-text lexical search
+        Index(
+            "ix_document_chunks_search_vector_gin",
+            "search_vector",
             postgresql_using="gin",
         ),
     )
