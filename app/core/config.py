@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
 
     GEMINI_API_KEY: str | None = None
-    GEMINI_LLM_MODEL: str = "gemini-3.5-flash"
+    GEMINI_LLM_MODEL: str = "gemini-2.5-flash"
     GEMINI_EMBEDDING_MODEL: str = "gemini-embedding-001"
 
     # Ingestion & Chunking

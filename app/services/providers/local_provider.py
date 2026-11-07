@@ -1,5 +1,6 @@
 """Local provider implementations (OpenAI-compatible HTTP servers and Sentence Transformers)."""
 
+import asyncio
 import json
 from collections.abc import AsyncGenerator
 
@@ -165,7 +166,7 @@ class LocalCudaEmbeddingProvider(EmbeddingProvider):
             return []
         self._ensure_loaded()
         assert self._model is not None
-        vectors = self._model.encode(texts, normalize_embeddings=True)
+        vectors = await asyncio.to_thread(self._model.encode, texts, normalize_embeddings=True)
         return [v.tolist() for v in vectors]
 
     async def embed_query(self, query: str) -> list[float]:

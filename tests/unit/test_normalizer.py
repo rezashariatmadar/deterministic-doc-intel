@@ -33,3 +33,10 @@ def test_normalize_table_cell_strips_null_bytes_and_control_chars() -> None:
     assert "\x0b" not in cleaned
     assert "\x0c" not in cleaned
     assert cleaned == "$47,525 million"
+
+
+def test_clean_text_preserves_compound_hyphenated_words() -> None:
+    text = "year-over-\nyear growth and non-\nGAAP metrics."
+    cleaned = clean_text(text)
+    assert "year-over-year" in cleaned
+    assert "non-GAAP" in cleaned

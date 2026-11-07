@@ -192,7 +192,7 @@ def test_factory_creates_gemini_providers() -> None:
         provider_type="gemini",
         api_key="gemini-test-key",
     )
-    assert llm.model_name == "gemini-3.5-flash"
+    assert llm.model_name == "gemini-2.5-flash"
 
 
 @pytest.mark.asyncio
@@ -207,13 +207,14 @@ async def test_gemini_embedding_provider_embed_texts_and_query() -> None:
     mock_vec = [0.1, 0.2, 0.3, 0.4]
 
     with respx.mock(base_url="https://generativelanguage.googleapis.com/v1beta") as respx_mock:
-        respx_mock.post("/models/gemini-embedding-001:batchEmbedContents").respond(
+        route = respx_mock.post("/models/gemini-embedding-001:batchEmbedContents").respond(
             status_code=200,
             json={"embeddings": [{"values": mock_vec}]},
         )
         res = await provider.embed_texts(["hello"])
         assert len(res) == 1
         assert res[0] == mock_vec
+        assert route.calls.last.request.headers["x-goog-api-key"] == "test-key"
 
         respx_mock.post("/models/gemini-embedding-001:batchEmbedContents").respond(
             status_code=200,
@@ -229,11 +230,11 @@ async def test_gemini_llm_provider_generate_and_stream() -> None:
 
     provider = GeminiLLMProvider(
         api_key="test-key",
-        model_name="gemini-3.5-flash",
+        model_name="gemini-2.5-flash",
     )
 
     with respx.mock(base_url="https://generativelanguage.googleapis.com/v1beta") as respx_mock:
-        respx_mock.post("/models/gemini-3.5-flash:generateContent").respond(
+        gen_route = respx_mock.post("/models/gemini-2.5-flash:generateContent").respond(
             status_code=200,
             json={
                 "candidates": [
@@ -243,15 +244,17 @@ async def test_gemini_llm_provider_generate_and_stream() -> None:
         )
         resp = await provider.generate(prompt="Question", system_prompt="Answer factually.")
         assert "Data Center revenue was $47.5B" in resp
+        assert gen_route.calls.last.request.headers["x-goog-api-key"] == "test-key"
 
         sse_data = (
             'data: {"candidates": [{"content": {"parts": [{"text": "Data Center"}]}}]}\n\n'
             'data: {"candidates": [{"content": {"parts": [{"text": " revenue"}]}}]}\n\n'
         )
-        respx_mock.post("/models/gemini-3.5-flash:streamGenerateContent").respond(
+        stream_route = respx_mock.post("/models/gemini-2.5-flash:streamGenerateContent").respond(
             status_code=200,
             headers={"Content-Type": "text/event-stream"},
             content=sse_data.encode("utf-8"),
         )
         stream_tokens = [tok async for tok in provider.generate_stream(prompt="Question")]
         assert "".join(stream_tokens) == "Data Center revenue"
+        assert stream_route.calls.last.request.headers["x-goog-api-key"] == "test-key"

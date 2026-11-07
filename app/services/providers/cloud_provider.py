@@ -196,10 +196,10 @@ class GeminiEmbeddingProvider(EmbeddingProvider):
         ]
 
         url = f"{self.base_url}/models/{clean_model}:batchEmbedContents"
-        params = {"key": self.api_key}
+        headers = {"x-goog-api-key": self.api_key}
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.post(url, params=params, json={"requests": requests})
+            response = await client.post(url, headers=headers, json={"requests": requests})
             response.raise_for_status()
             data = response.json()
 
@@ -216,7 +216,7 @@ class GeminiLLMProvider(LLMProvider):
     def __init__(
         self,
         api_key: str | None = None,
-        model_name: str = "gemini-3.5-flash",
+        model_name: str = "gemini-2.5-flash",
         base_url: str = "https://generativelanguage.googleapis.com/v1beta",
         timeout: float = 60.0,
     ) -> None:
@@ -235,7 +235,7 @@ class GeminiLLMProvider(LLMProvider):
     ) -> str:
         clean_model = self.model_name.removeprefix("models/")
         url = f"{self.base_url}/models/{clean_model}:generateContent"
-        params = {"key": self.api_key}
+        headers = {"x-goog-api-key": self.api_key}
 
         payload: dict[str, Any] = {
             "contents": [{"parts": [{"text": prompt}]}],
@@ -245,7 +245,7 @@ class GeminiLLMProvider(LLMProvider):
             payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.post(url, params=params, json=payload)
+            response = await client.post(url, headers=headers, json=payload)
             response.raise_for_status()
             data = response.json()
 
@@ -263,7 +263,8 @@ class GeminiLLMProvider(LLMProvider):
     ) -> AsyncGenerator[str, None]:
         clean_model = self.model_name.removeprefix("models/")
         url = f"{self.base_url}/models/{clean_model}:streamGenerateContent"
-        params = {"key": self.api_key, "alt": "sse"}
+        headers = {"x-goog-api-key": self.api_key}
+        params = {"alt": "sse"}
 
         payload: dict[str, Any] = {
             "contents": [{"parts": [{"text": prompt}]}],
@@ -274,7 +275,7 @@ class GeminiLLMProvider(LLMProvider):
 
         async with (
             httpx.AsyncClient(timeout=self.timeout) as client,
-            client.stream("POST", url, params=params, json=payload) as response,
+            client.stream("POST", url, headers=headers, params=params, json=payload) as response,
         ):
             response.raise_for_status()
             async for line in response.aiter_lines():

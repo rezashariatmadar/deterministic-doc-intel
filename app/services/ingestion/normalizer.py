@@ -16,6 +16,22 @@ HORIZONTAL_WHITESPACE_REGEX = re.compile(r"[^\S\r\n]+")
 EXCESSIVE_NEWLINES_REGEX = re.compile(r"\n{3,}")
 
 
+def _reconnect_hyphenated_words(match: re.Match[str]) -> str:
+    w1, w2 = match.group(1), match.group(2)
+    # Preserve hyphen for uppercase acronyms (e.g. "non-\nGAAP" -> "non-GAAP")
+    if w2.isupper() and len(w2) > 1:
+        return f"{w1}-{w2}"
+    # Preserve chained compounds (e.g. "year-over-\nyear" where preceding char is a hyphen)
+    start_pos = match.start(1)
+    if start_pos > 0 and match.string[start_pos - 1] == "-":
+        return f"{w1}-{w2}"
+    # Preserve dedicated compound prefixes in financial/technical texts
+    if w1.lower() in ("non", "self", "ex", "cross", "multi") and w2.islower() and len(w2) > 2:
+        return f"{w1}-{w2}"
+    # Default: reconnect split syllables (e.g. "oper-\nating" -> "operating")
+    return f"{w1}{w2}"
+
+
 def clean_text(text: str) -> str:
     """
     Clean raw extracted text from PDF/documents:
@@ -47,7 +63,7 @@ def clean_text(text: str) -> str:
         cleaned = cleaned.replace(orig, rep)
 
     # 4. Reconnect hyphenated words split across line breaks
-    cleaned = HYPHENATED_LINE_BREAK_REGEX.sub(r"\1\2", cleaned)
+    cleaned = HYPHENATED_LINE_BREAK_REGEX.sub(_reconnect_hyphenated_words, cleaned)
 
     # 5. Normalize whitespace: reduce multiple horizontal spaces, keep paragraph spacing
     cleaned = "\n".join(
