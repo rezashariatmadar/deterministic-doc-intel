@@ -1,0 +1,616 @@
+{
+  "version": "1.0",
+  "description": "Production Golden Evaluation Dataset v1 for RAG retrieval and generation benchmarking.",
+  "queries": [
+    {
+      "id": "q01",
+      "category": "exact_keyword",
+      "query": "What was Apple's total commercial paper liabilities as of September 30, 2023?",
+      "expected_documents": [
+        "Apple_10-K-Q4-2023-As-Filed.pdf",
+        "10-K 2023, 09.30.2023-2023-11-02-08-16",
+        "Apple Inc. Form 10-K Annual Report (FY 2023)"
+      ],
+      "expected_pages": [
+        33
+      ],
+      "required_substrings": [
+        "commercial paper",
+        "5,985"
+      ],
+      "ground_truth_answer": "As of September 30, 2023, Apple recorded ,985 million (.985 billion) in commercial paper liabilities under current liabilities.",
+      "is_answerable": true,
+      "metadata": {
+        "target_element": "table",
+        "target_doc": "Apple 10-K"
+      }
+    },
+    {
+      "id": "q02",
+      "category": "exact_keyword",
+      "query": "What is the mathematical formulation of Scaled Dot-Product Attention in the Transformer?",
+      "expected_documents": [
+        "Attention Is All You Need.pdf",
+        "Attention Is All You Need",
+        "Attention Is All You Need (Vaswani et al.)"
+      ],
+      "expected_pages": [
+        4
+      ],
+      "required_substrings": [
+        "scaled dot-product attention",
+        "softmax",
+        "√dk"
+      ],
+      "ground_truth_answer": "Scaled Dot-Product Attention is computed as Attention(Q, K, V) = softmax((Q K^T) / sqrt(d_k)) V, where queries and keys have dimension d_k and values have dimension d_v.",
+      "is_answerable": true,
+      "metadata": {
+        "target_element": "equation",
+        "target_doc": "Attention Is All You Need"
+      }
+    },
+    {
+      "id": "q03",
+      "category": "exact_keyword",
+      "query": "What reportable segments does NVIDIA operate under according to its 2024 Form 10-K?",
+      "expected_documents": [
+        "nvidia_10k_sample.pdf",
+        "NVIDIA CORPORATION Form 10-K",
+        "NVIDIA Corporation 2024 Form 10-K Annual Report"
+      ],
+      "expected_pages": [
+        2
+      ],
+      "required_substrings": [
+        "compute & networking",
+        "graphics"
+      ],
+      "ground_truth_answer": "NVIDIA's business is organized into two primary reportable segments: Compute & Networking and Graphics.",
+      "is_answerable": true,
+      "metadata": {
+        "target_element": "prose",
+        "target_doc": "NVIDIA 10-K"
+      }
+    },
+    {
+      "id": "q04",
+      "category": "exact_keyword",
+      "query": "What is the residual learning reformulation defined by He et al. for stacked nonlinear layers?",
+      "expected_documents": [
+        "Deep Residual Learning for Image Recognition.pdf",
+        "Deep Residual Learning For Image Recognition",
+        "Deep Residual Learning for Image Recognition (He et al.)"
+      ],
+      "expected_pages": [
+        2,
+        3
+      ],
+      "required_substrings": [
+        "residual learning",
+        "f(x)+x"
+      ],
+      "ground_truth_answer": "Instead of directly fitting an underlying mapping H(x), the stacked layers explicitly approximate a residual function F(x) := H(x) - x, recasting the original mapping into F(x) + x.",
+      "is_answerable": true,
+      "metadata": {
+        "target_element": "prose",
+        "target_doc": "Deep Residual Learning"
+      }
+    },
+    {
+      "id": "q05",
+      "category": "exact_keyword",
+      "query": "What was the term debt recorded under non-current liabilities for Apple on September 30, 2023?",
+      "expected_documents": [
+        "Apple_10-K-Q4-2023-As-Filed.pdf",
+        "10-K 2023, 09.30.2023-2023-11-02-08-16",
+        "Apple Inc. Form 10-K Annual Report (FY 2023)"
+      ],
+      "expected_pages": [
+        33
+      ],
+      "required_substrings": [
+        "non-current liabilities",
+        "term debt",
+        "95,281"
+      ],
+      "ground_truth_answer": "Under non-current liabilities, Apple recorded term debt of 5,281 million (5.281 billion) as of September 30, 2023.",
+      "is_answerable": true,
+      "metadata": {
+        "target_element": "table",
+        "target_doc": "Apple 10-K"
+      }
+    },
+    {
+      "id": "q06",
+      "category": "exact_keyword",
+      "query": "What warm-up schedule and optimizer hyperparameters were used for training the Transformer base model?",
+      "expected_documents": [
+        "Attention Is All You Need.pdf",
+        "Attention Is All You Need",
+        "Attention Is All You Need (Vaswani et al.)"
+      ],
+      "expected_pages": [
+        7
+      ],
+      "required_substrings": [
+        "warmup_steps = 4000",
+        "β1 = 0.9",
+        "β2 = 0.98"
+      ],
+      "ground_truth_answer": "The Transformer models were trained with the Adam optimizer with beta1 = 0.9, beta2 = 0.98, and epsilon = 10^-9, with warmup_steps = 4000 for learning rate warmup.",
+      "is_answerable": true,
+      "metadata": {
+        "target_element": "prose",
+        "target_doc": "Attention Is All You Need"
+      }
+    },
+    {
+      "id": "q07",
+      "category": "single_hop_semantic",
+      "query": "How does the Transformer encoder architecture process representations using self-attention and feed-forward sub-layers?",
+      "expected_documents": [
+        "Attention Is All You Need.pdf",
+        "Attention Is All You Need",
+        "Attention Is All You Need (Vaswani et al.)"
+      ],
+      "expected_pages": [
+        3
+      ],
+      "required_substrings": [
+        "n = 6 identical layers",
+        "layernorm(x + sublayer(x))",
+        "512"
+      ],
+      "ground_truth_answer": "The Transformer encoder consists of a stack of N = 6 identical layers. Each layer contains two sub-layers: a multi-head self-attention mechanism and a position-wise fully connected feed-forward network, employing residual connections and layer normalization LayerNorm(x + Sublayer(x)) with output dimension d_model = 512.",
+      "is_answerable": true,
+      "metadata": {
+        "target_doc": "Attention Is All You Need"
+      }
+    },
+    {
+      "id": "q08",
+      "category": "single_hop_semantic",
+      "query": "Why did Apple's total net sales decrease in fiscal year 2023 compared to fiscal year 2022?",
+      "expected_documents": [
+        "Apple_10-K-Q4-2023-As-Filed.pdf",
+        "10-K 2023, 09.30.2023-2023-11-02-08-16",
+        "Apple Inc. Form 10-K Annual Report (FY 2023)"
+      ],
+      "expected_pages": [
+        23
+      ],
+      "required_substrings": [
+        "decreased 3%",
+        "weakness in foreign",
+        "lower net sales of mac and iphone"
+      ],
+      "ground_truth_answer": "Apple's total net sales decreased 3% or 1.0 billion in 2023 compared to 2022. Weakness in foreign currencies relative to the U.S. dollar accounted for more than the entire decrease, coupled with lower net sales of Mac and iPhone, partially offset by higher Services net sales.",
+      "is_answerable": true,
+      "metadata": {
+        "target_doc": "Apple 10-K"
+      }
+    },
+    {
+      "id": "q09",
+      "category": "single_hop_semantic",
+      "query": "What is the degradation problem in very deep neural networks addressed by deep residual learning?",
+      "expected_documents": [
+        "Deep Residual Learning for Image Recognition.pdf",
+        "Deep Residual Learning For Image Recognition",
+        "Deep Residual Learning for Image Recognition (He et al.)"
+      ],
+      "expected_pages": [
+        1,
+        2
+      ],
+      "required_substrings": [
+        "degradation problem",
+        "accuracy gets saturated",
+        "higher training error"
+      ],
+      "ground_truth_answer": "The degradation problem occurs when deeper networks experience saturated accuracy followed by rapid degradation, leading to higher training error. It is an optimization obstacle rather than overfitting.",
+      "is_answerable": true,
+      "metadata": {
+        "target_doc": "Deep Residual Learning"
+      }
+    },
+    {
+      "id": "q10",
+      "category": "single_hop_semantic",
+      "query": "Why did NVIDIA's Data Center revenue experience massive growth in fiscal year 2024?",
+      "expected_documents": [
+        "nvidia_10k_sample.pdf",
+        "NVIDIA CORPORATION Form 10-K",
+        "NVIDIA Corporation 2024 Form 10-K Annual Report"
+      ],
+      "expected_pages": [
+        2
+      ],
+      "required_substrings": [
+        "data center revenue rose 217%",
+        "nvidia hgx"
+      ],
+      "ground_truth_answer": "NVIDIA's Data Center revenue surged 217% year-over-year to 7.5 billion in fiscal 2024, driven primarily by strong enterprise demand for the NVIDIA HGX accelerated computing platform for generative AI and LLMs.",
+      "is_answerable": true,
+      "metadata": {
+        "target_doc": "NVIDIA 10-K"
+      }
+    },
+    {
+      "id": "q11",
+      "category": "single_hop_semantic",
+      "query": "How does multi-head attention benefit the Transformer compared to a single attention function?",
+      "expected_documents": [
+        "Attention Is All You Need.pdf",
+        "Attention Is All You Need",
+        "Attention Is All You Need (Vaswani et al.)"
+      ],
+      "expected_pages": [
+        5
+      ],
+      "required_substrings": [
+        "different representation",
+        "single attention head"
+      ],
+      "ground_truth_answer": "Multi-head attention allows the model to jointly attend to information from different representation subspaces at different positions, avoiding the averaging effect that inhibits representation in a single attention head.",
+      "is_answerable": true,
+      "metadata": {
+        "target_doc": "Attention Is All You Need"
+      }
+    },
+    {
+      "id": "q12",
+      "category": "single_hop_semantic",
+      "query": "How are composite machines classified according to Section XVI Note 3 of the Harmonized Tariff Schedule?",
+      "expected_documents": [
+        "Harmonized Tariff Schedule of the United States Revision 22 (2026).pdf",
+        "Harmonized Tariff Schedule of the United States Revision 22 (2026)",
+        "Untitled"
+      ],
+      "expected_pages": [
+        2
+      ],
+      "required_substrings": [
+        "composite machines",
+        "principal function"
+      ],
+      "ground_truth_answer": "Unless context requires otherwise, composite machines consisting of two or more machines fitted together or designed to perform alternative functions are classified as if consisting only of the component that performs the principal function.",
+      "is_answerable": true,
+      "metadata": {
+        "target_doc": "HTS Schedule"
+      }
+    },
+    {
+      "id": "q13",
+      "category": "multi_hop_comparative",
+      "query": "Compare NVIDIA's total revenue in fiscal 2024 with Apple's total net sales in fiscal 2023.",
+      "expected_documents": [
+        "nvidia_10k_sample.pdf",
+        "NVIDIA CORPORATION Form 10-K",
+        "Apple_10-K-Q4-2023-As-Filed.pdf",
+        "10-K 2023, 09.30.2023-2023-11-02-08-16"
+      ],
+      "expected_pages": [
+        2,
+        3,
+        23,
+        31
+      ],
+      "required_substrings": [
+        "60,922",
+        "383,285"
+      ],
+      "ground_truth_answer": "NVIDIA's total revenue in fiscal 2024 was 0,922 million (0.92B), whereas Apple's total net sales in fiscal 2023 was 83,285 million (83.29B), with Apple's revenue being roughly 6.3 times larger than NVIDIA's.",
+      "is_answerable": true,
+      "metadata": {
+        "target_doc": "NVIDIA 10-K, Apple 10-K"
+      }
+    },
+    {
+      "id": "q14",
+      "category": "multi_hop_comparative",
+      "query": "How do the training hardware setups and GPU types compare between the original Transformer paper and NVIDIA's Data Center flagship platform?",
+      "expected_documents": [
+        "Attention Is All You Need.pdf",
+        "Attention Is All You Need",
+        "nvidia_10k_sample.pdf",
+        "NVIDIA CORPORATION Form 10-K"
+      ],
+      "expected_pages": [
+        7,
+        2
+      ],
+      "required_substrings": [
+        "8 nvidia p100 gpus",
+        "nvidia hgx"
+      ],
+      "ground_truth_answer": "The Transformer was trained on 8 NVIDIA P100 GPUs in a single machine (taking 3.5 days for the big model), whereas NVIDIA's 2024 Form 10-K highlights the modern NVIDIA HGX platform driving its Data Center architecture.",
+      "is_answerable": true,
+      "metadata": {
+        "target_doc": "Attention Is All You Need, NVIDIA 10-K"
+      }
+    },
+    {
+      "id": "q15",
+      "category": "multi_hop_comparative",
+      "query": "How does the depth and layer structure of the 152-layer ResNet compare to the 6-layer encoder stack of the base Transformer?",
+      "expected_documents": [
+        "Deep Residual Learning for Image Recognition.pdf",
+        "Deep Residual Learning For Image Recognition",
+        "Attention Is All You Need.pdf",
+        "Attention Is All You Need"
+      ],
+      "expected_pages": [
+        1,
+        5,
+        3
+      ],
+      "required_substrings": [
+        "152-layer",
+        "n = 6 identical layers"
+      ],
+      "ground_truth_answer": "ResNet-152 relies on an extremely deep convolutional backbone with 152 layers using bottleneck residual blocks, whereas the base Transformer uses a compact stack of N = 6 encoder layers relying on self-attention and feed-forward sub-layers.",
+      "is_answerable": true,
+      "metadata": {
+        "target_doc": "Deep Residual Learning, Attention Is All You Need"
+      }
+    },
+    {
+      "id": "q16",
+      "category": "multi_hop_comparative",
+      "query": "Compare the Research and Development spending of Apple in fiscal 2023 against NVIDIA in fiscal 2024.",
+      "expected_documents": [
+        "Apple_10-K-Q4-2023-As-Filed.pdf",
+        "10-K 2023, 09.30.2023-2023-11-02-08-16",
+        "nvidia_10k_sample.pdf",
+        "NVIDIA CORPORATION Form 10-K"
+      ],
+      "expected_pages": [
+        31,
+        3
+      ],
+      "required_substrings": [
+        "29,915",
+        "8,675"
+      ],
+      "ground_truth_answer": "Apple spent 9,915 million (9.92B) on Research and Development in fiscal 2023, while NVIDIA spent ,675 million (.68B) on R&D in fiscal 2024.",
+      "is_answerable": true,
+      "metadata": {
+        "target_doc": "Apple 10-K, NVIDIA 10-K"
+      }
+    },
+    {
+      "id": "q17",
+      "category": "multi_hop_comparative",
+      "query": "Compare Apple's net sales in Europe against Greater China in fiscal year 2023.",
+      "expected_documents": [
+        "Apple_10-K-Q4-2023-As-Filed.pdf",
+        "10-K 2023, 09.30.2023-2023-11-02-08-16",
+        "Apple Inc. Form 10-K Annual Report (FY 2023)"
+      ],
+      "expected_pages": [
+        24
+      ],
+      "required_substrings": [
+        "94,294",
+        "72,559"
+      ],
+      "ground_truth_answer": "In fiscal year 2023, Apple's net sales were 4,294 million in Europe and 2,559 million in Greater China, with Europe net sales exceeding Greater China by 1,735 million.",
+      "is_answerable": true,
+      "metadata": {
+        "target_doc": "Apple 10-K"
+      }
+    },
+    {
+      "id": "q18",
+      "category": "multi_hop_comparative",
+      "query": "How does the BLEU score and training cost of Transformer base compare to Transformer big on the WMT 2014 English-to-German task?",
+      "expected_documents": [
+        "Attention Is All You Need.pdf",
+        "Attention Is All You Need",
+        "Attention Is All You Need (Vaswani et al.)"
+      ],
+      "expected_pages": [
+        8
+      ],
+      "required_substrings": [
+        "27.3",
+        "28.4"
+      ],
+      "ground_truth_answer": "On the WMT 2014 English-to-German task, Transformer base achieved a BLEU score of 27.3, whereas Transformer big achieved 28.4 BLEU with increased FLOPs and parameter capacity.",
+      "is_answerable": true,
+      "metadata": {
+        "target_doc": "Attention Is All You Need"
+      }
+    },
+    {
+      "id": "q19",
+      "category": "tabular_numerical",
+      "query": "What was NVIDIA's gross profit, operating income, and net income in millions for fiscal year 2024?",
+      "expected_documents": [
+        "nvidia_10k_sample.pdf",
+        "NVIDIA CORPORATION Form 10-K",
+        "NVIDIA Corporation 2024 Form 10-K Annual Report"
+      ],
+      "expected_pages": [
+        3
+      ],
+      "required_substrings": [
+        "44,301",
+        "32,972",
+        "29,760"
+      ],
+      "ground_truth_answer": "In fiscal year 2024, NVIDIA reported gross profit of 4,301 million, operating income of 2,972 million, and net income of 9,760 million.",
+      "is_answerable": true,
+      "metadata": {
+        "target_doc": "NVIDIA 10-K"
+      }
+    },
+    {
+      "id": "q20",
+      "category": "tabular_numerical",
+      "query": "According to Apple's Consolidated Balance Sheets, what were the total current assets and total assets on September 30, 2023?",
+      "expected_documents": [
+        "Apple_10-K-Q4-2023-As-Filed.pdf",
+        "10-K 2023, 09.30.2023-2023-11-02-08-16",
+        "Apple Inc. Form 10-K Annual Report (FY 2023)"
+      ],
+      "expected_pages": [
+        33
+      ],
+      "required_substrings": [
+        "143,566",
+        "352,583"
+      ],
+      "ground_truth_answer": "As of September 30, 2023, Apple had total current assets of 43,566 million and total assets of 52,583 million.",
+      "is_answerable": true,
+      "metadata": {
+        "target_doc": "Apple 10-K"
+      }
+    },
+    {
+      "id": "q21",
+      "category": "tabular_numerical",
+      "query": "What were Apple's net sales by product category for iPhone, Mac, and Services in fiscal year 2023?",
+      "expected_documents": [
+        "Apple_10-K-Q4-2023-As-Filed.pdf",
+        "10-K 2023, 09.30.2023-2023-11-02-08-16",
+        "Apple Inc. Form 10-K Annual Report (FY 2023)"
+      ],
+      "expected_pages": [
+        25
+      ],
+      "required_substrings": [
+        "200,583",
+        "29,357",
+        "85,200"
+      ],
+      "ground_truth_answer": "For fiscal year 2023, Apple recorded net sales of 00,583 million for iPhone, 9,357 million for Mac, and 5,200 million for Services.",
+      "is_answerable": true,
+      "metadata": {
+        "target_doc": "Apple 10-K"
+      }
+    },
+    {
+      "id": "q22",
+      "category": "tabular_numerical",
+      "query": "What was NVIDIA's revenue breakdown across Gaming, Professional Visualization, and Automotive for fiscal 2024?",
+      "expected_documents": [
+        "nvidia_10k_sample.pdf",
+        "NVIDIA CORPORATION Form 10-K",
+        "NVIDIA Corporation 2024 Form 10-K Annual Report"
+      ],
+      "expected_pages": [
+        2
+      ],
+      "required_substrings": [
+        "10,447",
+        "1,553",
+        "1,091"
+      ],
+      "ground_truth_answer": "In fiscal 2024, NVIDIA's revenue by market platform was 0,447 million for Gaming, ,553 million for Professional Visualization, and ,091 million for Automotive.",
+      "is_answerable": true,
+      "metadata": {
+        "target_doc": "NVIDIA 10-K"
+      }
+    },
+    {
+      "id": "q23",
+      "category": "tabular_numerical",
+      "query": "According to Table 1 in He et al., what are the FLOPs for the 18-layer, 34-layer, 50-layer, and 152-layer ResNet architectures on ImageNet?",
+      "expected_documents": [
+        "Deep Residual Learning for Image Recognition.pdf",
+        "Deep Residual Learning For Image Recognition",
+        "Deep Residual Learning for Image Recognition (He et al.)"
+      ],
+      "expected_pages": [
+        5
+      ],
+      "required_substrings": [
+        "1.8×109",
+        "3.6×109",
+        "3.8×109",
+        "11.3×109"
+      ],
+      "ground_truth_answer": "According to Table 1 in He et al., the computational complexities are 1.8x10^9 FLOPs for 18-layer, 3.6x10^9 FLOPs for 34-layer, 3.8x10^9 FLOPs for 50-layer, and 11.3x10^9 FLOPs for 152-layer ResNet.",
+      "is_answerable": true,
+      "metadata": {
+        "target_doc": "Deep Residual Learning"
+      }
+    },
+    {
+      "id": "q24",
+      "category": "tabular_numerical",
+      "query": "What was Apple's provision for income taxes and basic earnings per share for fiscal year 2023?",
+      "expected_documents": [
+        "Apple_10-K-Q4-2023-As-Filed.pdf",
+        "10-K 2023, 09.30.2023-2023-11-02-08-16",
+        "Apple Inc. Form 10-K Annual Report (FY 2023)"
+      ],
+      "expected_pages": [
+        31
+      ],
+      "required_substrings": [
+        "16,741",
+        "6.16"
+      ],
+      "ground_truth_answer": "For fiscal year 2023, Apple recorded a provision for income taxes of 6,741 million and basic earnings per share of .16.",
+      "is_answerable": true,
+      "metadata": {
+        "target_doc": "Apple 10-K"
+      }
+    },
+    {
+      "id": "q25",
+      "category": "unanswerable_adversarial",
+      "query": "What was Tesla's total Cybertruck delivery volume and automotive gross margin in fiscal year 2023?",
+      "expected_documents": [],
+      "expected_pages": [],
+      "required_substrings": [],
+      "ground_truth_answer": "The provided documents do not contain information regarding Tesla's Cybertruck deliveries or automotive gross margin, as the corpus only includes filings for Apple, NVIDIA, and deep learning research papers.",
+      "is_answerable": false,
+      "metadata": {
+        "reason": "Out of corpus company"
+      }
+    },
+    {
+      "id": "q26",
+      "category": "unanswerable_adversarial",
+      "query": "What learning rate and quantum annealing schedule did Vaswani et al. use for D-Wave quantum computing experiments?",
+      "expected_documents": [],
+      "expected_pages": [],
+      "required_substrings": [],
+      "ground_truth_answer": "The provided documents do not contain any information about D-Wave quantum computing or quantum annealing schedules; the Transformer paper exclusively discusses classical deep learning on NVIDIA P100 GPUs.",
+      "is_answerable": false,
+      "metadata": {
+        "reason": "Out of scope technology"
+      }
+    },
+    {
+      "id": "q27",
+      "category": "unanswerable_adversarial",
+      "query": "What was NVIDIA's revenue from cryptocurrency mining cards (CMP) in the second quarter of fiscal 2025?",
+      "expected_documents": [],
+      "expected_pages": [],
+      "required_substrings": [],
+      "ground_truth_answer": "The provided documents do not contain quarterly segment information for fiscal 2025 or cryptocurrency mining revenue (CMP), as the NVIDIA filing in the corpus only covers fiscal years up to 2024.",
+      "is_answerable": false,
+      "metadata": {
+        "reason": "Out of range fiscal year/quarter"
+      }
+    },
+    {
+      "id": "q28",
+      "category": "unanswerable_adversarial",
+      "query": "How many retail stores did Apple operate in Antarctica as of the end of fiscal year 2023?",
+      "expected_documents": [],
+      "expected_pages": [],
+      "required_substrings": [],
+      "ground_truth_answer": "The provided documents do not contain any information about Apple operating retail stores in Antarctica, as Apple does not operate retail stores on that continent.",
+      "is_answerable": false,
+      "metadata": {
+        "reason": "Fictitious geographical location"
+      }
+    }
+  ]
+}

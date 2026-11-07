@@ -1,6 +1,6 @@
 {
-  "domain": "SEC Financial Filings (10-K / 10-Q)",
-  "description": "Curated enterprise financial documents with multi-column balance sheets and segment disclosures.",
+  "domain": "SEC Financial Filings (10-K) and AI Research Papers",
+  "description": "Production evaluation corpus consisting of SEC 10-K annual reports and foundational deep learning publications with dense tables, mathematical formulations, and multi-column layouts.",
   "documents": [
     {
       "filename": "nvidia_10k_sample.pdf",
@@ -13,6 +13,56 @@
         "Dense numerical financial metrics across fiscal years 2022-2024",
         "Repeating page headers and footers with page numbering",
         "Footnote disclosures directly tied to segment revenue rows"
+      ]
+    },
+    {
+      "filename": "Apple_10-K-Q4-2023-As-Filed.pdf",
+      "sha256": "e36d41ed3a32874efba3e33dc89ef7e1329e32a26e91b453cb0e9b680288a783",
+      "title": "Apple Inc. Form 10-K Annual Report (FY 2023)",
+      "total_pages": 80,
+      "category": "financial_report",
+      "challenging_elements": [
+        "Consolidated Statements of Operations and Balance Sheets with multi-year comparisons",
+        "Segment revenue breakdown across Americas, Europe, Greater China, Japan, Rest of Asia Pacific",
+        "Product revenue tables for iPhone, Mac, iPad, Wearables/Home/Accessories, and Services",
+        "Footnote disclosures for commitments, contingencies, and debt obligations"
+      ]
+    },
+    {
+      "filename": "Attention Is All You Need.pdf",
+      "sha256": "bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697",
+      "title": "Attention Is All You Need (Vaswani et al.)",
+      "total_pages": 15,
+      "category": "research_paper",
+      "challenging_elements": [
+        "Multi-Head Attention mathematical formulation and Scaled Dot-Product equations",
+        "Table 1 and Table 2 comparing training cost and BLEU scores across architectures",
+        "Positional encoding sinusoidal formulas and layer normalization steps",
+        "Visual model architecture diagrams and multi-column research layout"
+      ]
+    },
+    {
+      "filename": "Deep Residual Learning for Image Recognition.pdf",
+      "sha256": "1e0651b6810ecba34a3dbc5b5b0209226f889004607c1f203540a48d64e5a93a",
+      "title": "Deep Residual Learning for Image Recognition (He et al.)",
+      "total_pages": 12,
+      "category": "research_paper",
+      "challenging_elements": [
+        "Residual block formulation and identity mapping equations",
+        "Table 1, 3, 4 ImageNet classification error rates across 18, 34, 50, 101, 152 layers",
+        "Degradation analysis comparing plain networks to deep residual networks"
+      ]
+    },
+    {
+      "filename": "Harmonized Tariff Schedule of the United States Revision 22 (2026).pdf",
+      "sha256": "3e51d51dac17c4dfe36f420229873c84c1534c25bb437bad4a51abd7c9609ddb",
+      "title": "Harmonized Tariff Schedule of the United States Revision 22 (2026)",
+      "total_pages": 137,
+      "category": "legal_statute",
+      "challenging_elements": [
+        "Section XVI statutory classification notes and exceptions",
+        "Multi-tier hierarchical tariff schedules and subheadings",
+        "Statistical notes detailing semiconductor wafer fabrication and mask repair equipment"
       ]
     }
   ]
