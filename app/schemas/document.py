@@ -58,3 +58,27 @@ class ChunkRead(ChunkBase):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ParentChunkBase(BaseModel):
+    parent_index: int = Field(..., ge=0)
+    raw_text: str = Field(..., min_length=1)
+    contextualized_text: str = Field(..., min_length=1)
+    token_count: int = Field(..., gt=0)
+    page_start: int = Field(..., ge=1)
+    page_end: int = Field(..., ge=1)
+    section_path: str = Field(..., min_length=1)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ParentChunkCreate(ParentChunkBase):
+    document_id: UUID
+
+
+class ParentChunkRead(ParentChunkBase):
+    id: UUID
+    document_id: UUID
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+

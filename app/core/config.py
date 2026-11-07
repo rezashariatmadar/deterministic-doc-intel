@@ -43,11 +43,27 @@ class Settings(BaseSettings):
     # Ingestion & Chunking
     CHUNK_SIZE: int = 512
     CHUNK_OVERLAP: int = 64
+    PARENT_CHUNK_SIZE: int = 1200
+    CHILD_CHUNK_SIZE: int = 200
+    CHILD_CHUNK_OVERLAP: int = 30
 
     # Retrieval
     RETRIEVAL_TOP_K: int = 5
     SIMILARITY_THRESHOLD: float = 0.35
     MAX_CONTEXT_TOKENS: int = 4000
+
+    # Phase 2: Hybrid Search & RRF
+    HYBRID_SEARCH_CANDIDATES: int = 30
+    RRF_K: int = 60
+    WEIGHT_DENSE: float = 0.65
+    WEIGHT_SPARSE: float = 0.35
+
+    # Phase 2: Cross-Encoder Reranker
+    ENABLE_RERANKER: bool = True
+    RERANKER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    RERANKER_TOP_K: int = 5
+    RERANKER_THRESHOLD: float = 0.05
+    RERANKER_TIMEOUT_MS: int = 500
 
     model_config = SettingsConfigDict(
         env_file=".env",

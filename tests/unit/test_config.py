@@ -154,3 +154,91 @@ def test_cors_configuration_validity():
             origins = kwargs.get("allow_origins", [])
             assert isinstance(origins, list)
             assert not ("*" in origins and kwargs.get("allow_credentials") is True)
+
+
+def test_phase2_settings_and_query_schemas():
+    import uuid
+    from datetime import datetime
+    from app.schemas.document import ParentChunkCreate, ParentChunkRead
+    from app.schemas.query import QueryRequest, RetrievedChunk
+
+    settings = Settings(
+        DATABASE_URL="postgresql+asyncpg://postgres:postgres@localhost:5432/rag_db",
+        REDIS_URL="redis://localhost:6379/0",
+    )
+    assert settings.PARENT_CHUNK_SIZE == 1200
+    assert settings.CHILD_CHUNK_SIZE == 200
+    assert settings.CHILD_CHUNK_OVERLAP == 30
+    assert settings.HYBRID_SEARCH_CANDIDATES == 30
+    assert settings.RRF_K == 60
+    assert settings.WEIGHT_DENSE == 0.65
+    assert settings.WEIGHT_SPARSE == 0.35
+    assert settings.ENABLE_RERANKER is True
+    assert settings.RERANKER_MODEL == "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    assert settings.RERANKER_TIMEOUT_MS == 500
+
+    # QueryRequest phase 2 controls
+    req = QueryRequest(
+        query="What was revenue?",
+        search_mode="hybrid",
+        weight_dense=0.7,
+        weight_sparse=0.3,
+        enable_reranker=True,
+        enable_query_rewrite=True,
+        enable_hyde=True,
+    )
+    assert req.search_mode == "hybrid"
+    assert req.weight_dense == 0.7
+    assert req.enable_query_rewrite is True
+
+    # RetrievedChunk with phase 2 rank/score metadata
+    p_id = uuid.uuid4()
+    c = RetrievedChunk(
+        source_id=1,
+        chunk_id=uuid.uuid4(),
+        parent_chunk_id=p_id,
+        document_id=uuid.uuid4(),
+        document_title="Report",
+        page_start=1,
+        page_end=1,
+        section_path="Intro",
+        element_type="prose",
+        text="Sample text",
+        contextualized_text="[Doc] Sample text",
+        similarity_score=0.92,
+        dense_rank=1,
+        sparse_rank=3,
+        rrf_score=0.032,
+        rerank_score=0.89,
+    )
+    assert c.parent_chunk_id == p_id
+    assert c.dense_rank == 1
+    assert c.rrf_score == 0.032
+    assert c.rerank_score == 0.89
+
+    # ParentChunkCreate and ParentChunkRead
+    p_create = ParentChunkCreate(
+        document_id=uuid.uuid4(),
+        parent_index=0,
+        raw_text="Parent text",
+        contextualized_text="[Doc] Parent text",
+        token_count=100,
+        page_start=1,
+        page_end=2,
+        section_path="Overview",
+    )
+    assert p_create.parent_index == 0
+    p_read = ParentChunkRead(
+        id=p_id,
+        document_id=p_create.document_id,
+        parent_index=0,
+        raw_text="Parent text",
+        contextualized_text="[Doc] Parent text",
+        token_count=100,
+        page_start=1,
+        page_end=2,
+        section_path="Overview",
+        created_at=datetime.now(),
+    )
+    assert p_read.id == p_id
+

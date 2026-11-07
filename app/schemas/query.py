@@ -1,6 +1,6 @@
 """Pydantic schemas for search query requests, retrieved chunks, and RAG responses."""
 
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -42,6 +42,11 @@ class RetrievedChunk(BaseModel):
         le=1.0,
         description="Cosine similarity score (1 - cosine distance)",
     )
+    dense_rank: int | None = None
+    sparse_rank: int | None = None
+    rrf_score: float | None = None
+    rerank_score: float | None = None
+    parent_chunk_id: UUID | None = None
     bbox: dict[str, Any] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -55,6 +60,12 @@ class QueryRequest(BaseModel):
     stream: bool = Field(
         default=False, description="Whether to stream the generated answer via SSE"
     )
+    search_mode: Literal["hybrid", "dense", "sparse"] = "hybrid"
+    weight_dense: float | None = Field(default=None, ge=0.0, le=1.0)
+    weight_sparse: float | None = Field(default=None, ge=0.0, le=1.0)
+    enable_reranker: bool | None = None
+    enable_query_rewrite: bool = False
+    enable_hyde: bool = False
 
 
 class Citation(BaseModel):
