@@ -179,3 +179,15 @@ def test_chunker_splits_oversized_sentence_without_punctuation() -> None:
     assert len(chunks) > 1, "Must split oversized sentence into multiple chunks"
     for c in chunks:
         assert c.token_count <= 50, f"Chunk {c.chunk_index} exceeded target tokens: {c.token_count}"
+
+
+def test_no_ghost_chunk_after_large_paragraph_at_eof() -> None:
+    chunker = DocumentChunker(target_tokens=50, overlap_tokens=10)
+    large_text = "word " * 50
+    doc = ParsedDocument(title="Doc", total_pages=1, elements=[
+        StructuralElement(element_type="prose", text=large_text.strip(), page_number=1)
+    ])
+    chunks = chunker.chunk_document(doc)
+    assert len(chunks) == 2
+    assert chunks[-1].raw_text != chunks[-2].raw_text
+

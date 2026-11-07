@@ -54,13 +54,14 @@ class DocumentChunker:
         prose_buffer: list[str] = []
         prose_pages: list[int] = []
         prose_elements: list[StructuralElement] = []
+        buffer_has_new_content = False
         current_section = "General"
 
         for el in doc.elements:
             # 1. Handle Heading elements: update the hierarchical breadcrumb stack
             if el.element_type == "heading":
                 # Flush existing prose before changing sections
-                if prose_buffer:
+                if prose_buffer and buffer_has_new_content:
                     chunk = self._flush_prose_buffer(
                         prose_buffer,
                         prose_pages,
@@ -72,9 +73,10 @@ class DocumentChunker:
                     if chunk:
                         chunks.append(chunk)
                         chunk_idx += 1
-                    prose_buffer = []
-                    prose_pages = []
-                    prose_elements = []
+                prose_buffer = []
+                prose_pages = []
+                prose_elements = []
+                buffer_has_new_content = False
 
                 level = el.heading_level or 1
                 heading_stack[level] = el.text
@@ -90,7 +92,7 @@ class DocumentChunker:
             # 2. Handle Table elements: preserve atomicity or split large tables
             if el.element_type == "table":
                 # Flush existing prose before table
-                if prose_buffer:
+                if prose_buffer and buffer_has_new_content:
                     chunk = self._flush_prose_buffer(
                         prose_buffer,
                         prose_pages,
@@ -102,9 +104,10 @@ class DocumentChunker:
                     if chunk:
                         chunks.append(chunk)
                         chunk_idx += 1
-                    prose_buffer = []
-                    prose_pages = []
-                    prose_elements = []
+                prose_buffer = []
+                prose_pages = []
+                prose_elements = []
+                buffer_has_new_content = False
 
                 table_chunks = self._chunk_table(
                     table_text=el.text,
@@ -119,16 +122,26 @@ class DocumentChunker:
                 continue
 
             # 3. Handle Prose elements
+            breadcrumb = f"[Document: {doc.title} | Section: {current_section} | Page: {el.page_number}]"
+            header_tokens = self.count_tokens(f"{breadcrumb} ")
+            max_content_tokens = (
+                max(1, self.target_tokens - header_tokens)
+                if self.target_tokens > 40
+                else self.target_tokens
+            )
+
             el_tokens = self.count_tokens(el.text)
             current_buffer_tokens = self.count_tokens(" ".join(prose_buffer))
 
-            if current_buffer_tokens + el_tokens <= self.target_tokens:
+            if current_buffer_tokens + el_tokens <= max_content_tokens:
                 prose_buffer.append(el.text)
                 prose_pages.append(el.page_number)
                 prose_elements.append(el)
+                buffer_has_new_content = True
             else:
                 # Flush buffer
-                if prose_buffer:
+                leading_overlap = None
+                if prose_buffer and buffer_has_new_content:
                     chunk = self._flush_prose_buffer(
                         prose_buffer,
                         prose_pages,
@@ -143,12 +156,19 @@ class DocumentChunker:
                     overlap_buf, overlap_pgs, overlap_els = self._get_overlap_tail(
                         prose_buffer, prose_pages, prose_elements
                     )
+                    leading_overlap = " ".join(overlap_buf) if overlap_buf else None
                     prose_buffer = overlap_buf
                     prose_pages = overlap_pgs
                     prose_elements = overlap_els
+                    buffer_has_new_content = False
+                elif not buffer_has_new_content:
+                    leading_overlap = " ".join(prose_buffer) if prose_buffer else None
+                    prose_buffer = []
+                    prose_pages = []
+                    prose_elements = []
 
-                # If single paragraph exceeds target tokens, split by sentences
-                if el_tokens > self.target_tokens:
+                # If single paragraph exceeds max content tokens, split by sentences
+                if el_tokens > max_content_tokens:
                     sentence_chunks = self._split_large_text(
                         text=el.text,
                         doc_title=doc.title,
@@ -156,6 +176,7 @@ class DocumentChunker:
                         page_num=el.page_number,
                         start_chunk_idx=chunk_idx,
                         metadata=el.metadata,
+                        leading_overlap=leading_overlap,
                     )
                     chunks.extend(sentence_chunks)
                     chunk_idx += len(sentence_chunks)
@@ -177,13 +198,15 @@ class DocumentChunker:
                                 metadata=self._copy_metadata(last_c.metadata),
                             )
                         ]
+                        buffer_has_new_content = False
                 else:
                     prose_buffer.append(el.text)
                     prose_pages.append(el.page_number)
                     prose_elements.append(el)
+                    buffer_has_new_content = True
 
-        # Flush any remaining prose
-        if prose_buffer:
+        # Flush any remaining prose only if new content was added
+        if prose_buffer and buffer_has_new_content:
             chunk = self._flush_prose_buffer(
                 prose_buffer,
                 prose_pages,
@@ -331,7 +354,7 @@ class DocumentChunker:
 
         breadcrumb = f"[Document: {doc_title} | Section: {section_path} | Page: {page_start}]"
         contextualized_text = f"{breadcrumb} {raw_text}"
-        tokens = self.count_tokens(raw_text)
+        tokens = self.count_tokens(contextualized_text)
         metadata = self._merge_element_metadata(elements or [])
 
         return DocumentChunkDraft(
@@ -360,13 +383,14 @@ class DocumentChunker:
         lines = [line.strip() for line in table_text.splitlines() if line.strip()]
         if len(lines) < 3:
             # Small or invalid table, wrap as single chunk
-            tokens = self.count_tokens(table_text)
             breadcrumb = f"[Document: {doc_title} | Section: {section_path} | Page: {page_num}]"
+            contextualized_text = f"{breadcrumb} {table_text}"
+            tokens = self.count_tokens(contextualized_text)
             return [
                 DocumentChunkDraft(
                     chunk_index=start_chunk_idx,
                     raw_text=table_text,
-                    contextualized_text=f"{breadcrumb} {table_text}",
+                    contextualized_text=contextualized_text,
                     token_count=tokens,
                     page_start=page_num,
                     page_end=page_num,
@@ -381,15 +405,16 @@ class DocumentChunker:
         separator_row = lines[1]
         data_rows = lines[2:]
 
-        table_tokens = self.count_tokens(table_text)
+        breadcrumb = f"[Document: {doc_title} | Section: {section_path} | Page: {page_num}]"
+        contextualized_table = f"{breadcrumb} {table_text}"
+        table_tokens = self.count_tokens(contextualized_table)
         if table_tokens <= self.target_tokens:
             # Table fits cleanly in one chunk
-            breadcrumb = f"[Document: {doc_title} | Section: {section_path} | Page: {page_num}]"
             return [
                 DocumentChunkDraft(
                     chunk_index=start_chunk_idx,
                     raw_text=table_text,
-                    contextualized_text=f"{breadcrumb} {table_text}",
+                    contextualized_text=contextualized_table,
                     token_count=table_tokens,
                     page_start=page_num,
                     page_end=page_num,
@@ -402,7 +427,8 @@ class DocumentChunker:
         # Table exceeds target tokens: slice data rows and repeat headers on every slice
         table_chunks: list[DocumentChunkDraft] = []
         current_rows: list[str] = []
-        base_header_tokens = self.count_tokens(f"{header_row}\n{separator_row}")
+        header_str = f"{breadcrumb} {header_row}\n{separator_row}"
+        base_header_tokens = self.count_tokens(header_str)
         curr_idx = start_chunk_idx
 
         for row in data_rows:
@@ -415,13 +441,13 @@ class DocumentChunker:
             else:
                 # Flush slice
                 slice_text = "\n".join([header_row, separator_row, *current_rows])
-                breadcrumb = f"[Document: {doc_title} | Section: {section_path} | Page: {page_num}]"
+                ctx_slice = f"{breadcrumb} {slice_text}"
                 table_chunks.append(
                     DocumentChunkDraft(
                         chunk_index=curr_idx,
                         raw_text=slice_text,
-                        contextualized_text=f"{breadcrumb} {slice_text}",
-                        token_count=self.count_tokens(slice_text),
+                        contextualized_text=ctx_slice,
+                        token_count=self.count_tokens(ctx_slice),
                         page_start=page_num,
                         page_end=page_num,
                         section_path=section_path,
@@ -434,13 +460,13 @@ class DocumentChunker:
 
         if current_rows:
             slice_text = "\n".join([header_row, separator_row, *current_rows])
-            breadcrumb = f"[Document: {doc_title} | Section: {section_path} | Page: {page_num}]"
+            ctx_slice = f"{breadcrumb} {slice_text}"
             table_chunks.append(
                 DocumentChunkDraft(
                     chunk_index=curr_idx,
                     raw_text=slice_text,
-                    contextualized_text=f"{breadcrumb} {slice_text}",
-                    token_count=self.count_tokens(slice_text),
+                    contextualized_text=ctx_slice,
+                    token_count=self.count_tokens(ctx_slice),
                     page_start=page_num,
                     page_end=page_num,
                     section_path=section_path,
@@ -459,16 +485,24 @@ class DocumentChunker:
         page_num: int,
         start_chunk_idx: int,
         metadata: dict[str, Any] | None = None,
+        leading_overlap: str | None = None,
     ) -> list[DocumentChunkDraft]:
         """Split oversized prose text along sentence boundaries with token budgeting."""
         chunk_metadata = self._copy_metadata(metadata)
-        # Simple sentence splitter
-        raw_sentences = re.split(r"(?<=[.!?])\s+", text)
+        # Split along sentence boundaries, semicolons, and clause markers
+        raw_sentences = re.split(r"(?<=[.!?])\s+|(?<=;)\s+|(?<=:\n)\s*", text)
         sentences: list[str] = []
-        step_budget = (
-            max(1, self.target_tokens - self.overlap_tokens)
-            if self.overlap_tokens
+        breadcrumb = f"[Document: {doc_title} | Section: {section_path} | Page: {page_num}]"
+        breadcrumb_tokens = self.count_tokens(f"{breadcrumb} ")
+        effective_target = (
+            max(1, self.target_tokens - breadcrumb_tokens)
+            if self.target_tokens > 40
             else self.target_tokens
+        )
+        step_budget = (
+            max(1, effective_target - self.overlap_tokens)
+            if self.overlap_tokens
+            else effective_target
         )
         for s in raw_sentences:
             s_clean = s.strip()
@@ -492,7 +526,7 @@ class DocumentChunker:
                     sentences.append(" ".join(sub_buf))
 
         chunks: list[DocumentChunkDraft] = []
-        curr_sentences: list[str] = []
+        curr_sentences: list[str] = [leading_overlap] if leading_overlap else []
         curr_idx = start_chunk_idx
 
         for s in sentences:
@@ -501,17 +535,17 @@ class DocumentChunker:
                 continue
 
             candidate = " ".join([*curr_sentences, s_clean])
-            if self.count_tokens(candidate) <= self.target_tokens or not curr_sentences:
+            if self.count_tokens(candidate) <= effective_target or not curr_sentences:
                 curr_sentences.append(s_clean)
             else:
                 raw_chunk = " ".join(curr_sentences)
-                breadcrumb = f"[Document: {doc_title} | Section: {section_path} | Page: {page_num}]"
+                ctx_chunk = f"{breadcrumb} {raw_chunk}"
                 chunks.append(
                     DocumentChunkDraft(
                         chunk_index=curr_idx,
                         raw_text=raw_chunk,
-                        contextualized_text=f"{breadcrumb} {raw_chunk}",
-                        token_count=self.count_tokens(raw_chunk),
+                        contextualized_text=ctx_chunk,
+                        token_count=self.count_tokens(ctx_chunk),
                         page_start=page_num,
                         page_end=page_num,
                         section_path=section_path,
@@ -526,7 +560,7 @@ class DocumentChunker:
                         overlap_s = self.tokenizer.decode(toks[-self.overlap_tokens :]).strip()
                     else:
                         overlap_s = raw_chunk
-                    if self.count_tokens(f"{overlap_s} {s_clean}") <= self.target_tokens:
+                    if self.count_tokens(f"{overlap_s} {s_clean}") <= effective_target:
                         curr_sentences = [overlap_s, s_clean]
                     else:
                         curr_sentences = [s_clean]
@@ -535,13 +569,13 @@ class DocumentChunker:
 
         if curr_sentences:
             raw_chunk = " ".join(curr_sentences)
-            breadcrumb = f"[Document: {doc_title} | Section: {section_path} | Page: {page_num}]"
+            ctx_chunk = f"{breadcrumb} {raw_chunk}"
             chunks.append(
                 DocumentChunkDraft(
                     chunk_index=curr_idx,
                     raw_text=raw_chunk,
-                    contextualized_text=f"{breadcrumb} {raw_chunk}",
-                    token_count=self.count_tokens(raw_chunk),
+                    contextualized_text=ctx_chunk,
+                    token_count=self.count_tokens(ctx_chunk),
                     page_start=page_num,
                     page_end=page_num,
                     section_path=section_path,
