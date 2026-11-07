@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     SEMANTIC_CACHE_THRESHOLD: float = 0.94
     SEMANTIC_CACHE_TTL: int = 86400
 
+    # Celery Background Tasks
+    CELERY_BROKER_URL: str = "redis://localhost:6379/1"
+    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/2"
+
     # Embedding Provider Configuration
     EMBEDDING_PROVIDER: Literal["local", "openai", "gemini"] = "local"
     EMBEDDING_MODEL: str = "BAAI/bge-m3"

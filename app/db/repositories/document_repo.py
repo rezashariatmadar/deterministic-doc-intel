@@ -1,5 +1,6 @@
 """Repository pattern for Document database operations."""
 
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -26,6 +27,8 @@ class DocumentRepository:
             total_pages=doc_in.total_pages,
             extra_metadata=doc_in.extra_metadata,
             status="PENDING",
+            task_id=doc_in.task_id,
+            processing_stage=doc_in.processing_stage,
         )
         self.session.add(doc)
         await self.session.commit()
@@ -41,6 +44,12 @@ class DocumentRepository:
     async def get_by_hash(self, file_hash: str) -> Document | None:
         """Fetch document by unique SHA-256 file hash for idempotency."""
         stmt = select(Document).where(Document.file_hash == file_hash)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_by_task_id(self, task_id: str) -> Document | None:
+        """Fetch document by Celery task ID."""
+        stmt = select(Document).where(Document.task_id == task_id)
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -60,19 +69,34 @@ class DocumentRepository:
         self,
         doc_id: UUID,
         status: str,
+        processing_stage: str | None = None,
+        task_id: str | None = None,
         total_chunks: int | None = None,
+        total_pages: int | None = None,
+        title: str | None = None,
         error_message: str | None = None,
+        extra_metadata: dict[str, Any] | None = None,
     ) -> Document | None:
-        """Update processing status and chunk statistics."""
+        """Update processing status, stage, and metadata."""
         doc = await self.get_by_id(doc_id)
         if not doc:
             return None
 
         doc.status = status
+        if processing_stage is not None:
+            doc.processing_stage = processing_stage
+        if task_id:
+            doc.task_id = task_id
         if total_chunks is not None:
             doc.total_chunks = total_chunks
+        if total_pages is not None:
+            doc.total_pages = total_pages
+        if title is not None:
+            doc.title = title
         if error_message is not None:
             doc.error_message = error_message
+        if extra_metadata is not None:
+            doc.extra_metadata = extra_metadata
 
         await self.session.commit()
         await self.session.refresh(doc)

@@ -6,12 +6,14 @@ import tempfile
 from pathlib import Path
 from uuid import UUID
 
+from celery.result import AsyncResult
 from fastapi import (
     APIRouter,
     Depends,
     File,
     Form,
     HTTPException,
+    Query,
     Response,
     UploadFile,
     status,
@@ -19,15 +21,18 @@ from fastapi import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_db, get_embedding, get_semantic_cache
-from app.core.config import get_settings
 from app.core.exceptions import AppException, DocumentNotFoundError
-from app.db.repositories.chunk_repo import ChunkRepository
 from app.db.repositories.document_repo import DocumentRepository
-from app.schemas.document import ChunkCreate, DocumentCreate, DocumentRead, ParentChunkCreate
+from app.schemas.document import (
+    DocumentCreate,
+    DocumentRead,
+    TaskStatusResponse,
+)
 from app.services.cache.semantic_cache import SemanticCacheService
-from app.services.ingestion.chunker import DocumentChunker
-from app.services.ingestion.parser import PDFLayoutParser
+from app.services.ingestion.pipeline import process_document_ingestion
 from app.services.providers.base import EmbeddingProvider
+from app.workers.celery_app import celery_app
+from app.workers.tasks import ingest_document_task
 
 router = APIRouter()
 
@@ -41,6 +46,7 @@ async def ingest_document(
     response: Response,
     file: UploadFile = File(...),
     category: str | None = Form(default=None),
+    async_mode: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
     embedding_provider: EmbeddingProvider = Depends(get_embedding),
     semantic_cache: SemanticCacheService | None = Depends(get_semantic_cache),
@@ -48,6 +54,7 @@ async def ingest_document(
     """
     Ingest a PDF document idempotently.
     Parses layout and tables, chunks with contextual breadcrumbs, embeds via pgvector.
+    Supports synchronous execution (default) or background execution via Celery (async_mode=True).
     If the document SHA-256 hash was already indexed, returns the existing document.
     """
     content = await file.read()
@@ -59,13 +66,14 @@ async def ingest_document(
 
     file_hash = hashlib.sha256(content).hexdigest()
     doc_repo = DocumentRepository(db)
-    chunk_repo = ChunkRepository(db)
 
     # 1. Idempotency check: return existing document if already ingested
     existing_doc = await doc_repo.get_by_hash(file_hash)
     if existing_doc:
         if existing_doc.status == "COMPLETED":
             response.status_code = status.HTTP_200_OK
+            if existing_doc.processing_stage is None:
+                existing_doc.processing_stage = "COMPLETED"
             return DocumentRead.model_validate(existing_doc)
         if existing_doc.status in ("PENDING", "PROCESSING"):
             raise HTTPException(
@@ -77,161 +85,149 @@ async def ingest_document(
         if semantic_cache is not None:
             await semantic_cache.invalidate_document(existing_doc.id)
 
-    # 2. Save temporary file to run layout-aware parser
     filename = file.filename or "uploaded_document.pdf"
     suffix = os.path.splitext(filename)[1] or ".pdf"
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
-        tmp_file.write(content)
-        tmp_path = tmp_file.name
-
-    doc = None
-    try:
-        parser = PDFLayoutParser()
-        parsed_doc = parser.parse(Path(tmp_path))
-
-        doc_title = parsed_doc.title or filename
-        total_pages = parsed_doc.total_pages
-
-        # Extract document-level structural metadata from parser
-        table_count = sum(1 for el in parsed_doc.elements if el.element_type == "table")
-        heading_count = sum(1 for el in parsed_doc.elements if el.element_type == "heading")
-        extra_metadata = {
-            "table_count": table_count,
-            "heading_count": heading_count,
-            "total_structural_elements": len(parsed_doc.elements),
-            "parser": "PDFLayoutParser",
-        }
-
-        # 3. Create Document record in DB
+    if async_mode:
         doc = await doc_repo.create(
             DocumentCreate(
                 filename=filename,
-                title=doc_title,
+                title=filename,
                 source_type="pdf",
                 category=category,
                 file_hash=file_hash,
-                total_pages=total_pages,
-                extra_metadata=extra_metadata,
+                total_pages=0,
+                processing_stage="QUEUED",
             )
         )
+        staging_dir = Path("data/uploads")
+        staging_dir.mkdir(parents=True, exist_ok=True)
+        staging_path = staging_dir / f"{doc.id}{suffix}"
+        staging_path.write_bytes(content)
 
-        # 4. Generate hierarchical chunks
-        settings = get_settings()
-        chunker = DocumentChunker(
-            target_tokens=settings.CHILD_CHUNK_SIZE,
-            overlap_tokens=settings.CHILD_CHUNK_OVERLAP,
-        )
-        hierarchical_result = chunker.chunk_document_hierarchical(
-            parsed_doc,
-            parent_tokens=settings.PARENT_CHUNK_SIZE,
-            child_tokens=settings.CHILD_CHUNK_SIZE,
-            child_overlap=settings.CHILD_CHUNK_OVERLAP,
-        )
-
-        parent_id_map: dict[int, UUID] = {}
-        if hierarchical_result.parents:
-            parent_creates = [
-                ParentChunkCreate(
-                    document_id=doc.id,
-                    parent_index=p_idx,
-                    raw_text=p.raw_text,
-                    contextualized_text=p.contextualized_text,
-                    token_count=p.token_count,
-                    page_start=p.page_start,
-                    page_end=p.page_end,
-                    section_path=p.section_path,
-                    metadata=p.metadata,
-                )
-                for p_idx, p in enumerate(hierarchical_result.parents)
-            ]
-            saved_parents = await chunk_repo.bulk_create_parents(parent_creates)
-            parent_id_map = {p.parent_index: p.id for p in saved_parents}
-
-        child_drafts = [c for _, c in hierarchical_result.children]
-        if child_drafts:
-            # 5. Compute vector embeddings in batches
-            texts_to_embed = [c.contextualized_text for c in child_drafts]
-            batch_size = settings.EMBEDDING_BATCH_SIZE
-            embeddings: list[list[float]] = []
-
-            for i in range(0, len(texts_to_embed), batch_size):
-                batch = texts_to_embed[i : i + batch_size]
-                vectors = await embedding_provider.embed_texts(batch)
-                embeddings.extend(vectors)
-
-            # 6. Bulk insert chunks into PostgreSQL with parent_chunk_id
-            chunk_creates = [
-                ChunkCreate(
-                    document_id=doc.id,
-                    parent_chunk_id=parent_id_map.get(p_idx),
-                    chunk_index=draft.chunk_index,
-                    raw_text=draft.raw_text,
-                    contextualized_text=draft.contextualized_text,
-                    token_count=draft.token_count,
-                    page_start=draft.page_start,
-                    page_end=draft.page_end,
-                    section_path=draft.section_path,
-                    element_type=draft.element_type,
-                    embedding_model=embedding_provider.model_name,
-                    embedding=embeddings[idx],
-                    metadata=draft.metadata,
-                )
-                for idx, (p_idx, draft) in enumerate(hierarchical_result.children)
-            ]
-            await chunk_repo.bulk_create(chunk_creates)
-
-        # 7. Update document status to COMPLETED
+        task = ingest_document_task.delay(str(doc.id), str(staging_path))
         updated_doc = await doc_repo.update_status(
             doc_id=doc.id,
-            status="COMPLETED",
-            total_chunks=len(child_drafts),
+            status="PENDING",
+            processing_stage="QUEUED",
+            task_id=task.id,
         )
-
         assert updated_doc is not None
+        response.status_code = status.HTTP_202_ACCEPTED
         return DocumentRead.model_validate(updated_doc)
 
+    # Synchronous ingestion (default)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
+        tmp_file.write(content)
+        tmp_path = Path(tmp_file.name)
+
+    try:
+        doc = await doc_repo.create(
+            DocumentCreate(
+                filename=filename,
+                title=filename,
+                source_type="pdf",
+                category=category,
+                file_hash=file_hash,
+                total_pages=0,
+                processing_stage="PARSING",
+            )
+        )
+        completed_doc = await process_document_ingestion(
+            document_id=doc.id,
+            file_path=tmp_path,
+            session=db,
+            task_id=None,
+            embedding_provider=embedding_provider,
+        )
+        return DocumentRead.model_validate(completed_doc)
     except AppException as exc:
-        if doc is not None:
-            try:
-                await doc_repo.update_status(
-                    doc_id=doc.id,
-                    status="FAILED",
-                    error_message=str(exc),
-                )
-            except Exception:
-                await db.rollback()
-                await doc_repo.update_status(
-                    doc_id=doc.id,
-                    status="FAILED",
-                    error_message=str(exc),
-                )
         raise HTTPException(
             status_code=exc.status_code,
             detail=f"Document ingestion failed: {exc.message}",
         ) from exc
     except Exception as exc:
-        if doc is not None:
-            try:
-                await doc_repo.update_status(
-                    doc_id=doc.id,
-                    status="FAILED",
-                    error_message=str(exc),
-                )
-            except Exception:
-                await db.rollback()
-                await doc_repo.update_status(
-                    doc_id=doc.id,
-                    status="FAILED",
-                    error_message=str(exc),
-                )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Document ingestion failed: {exc}",
         ) from exc
     finally:
-        if os.path.exists(tmp_path):
+        if tmp_path.exists():
             os.remove(tmp_path)
+
+
+@router.get(
+    "/documents/tasks/{task_id}",
+    response_model=TaskStatusResponse,
+)
+@router.get(
+    "/tasks/{task_id}",
+    response_model=TaskStatusResponse,
+    include_in_schema=False,
+)
+async def get_task_status(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> TaskStatusResponse:
+    """Retrieve execution status and stage for a background ingestion task."""
+    doc_repo = DocumentRepository(db)
+    doc = await doc_repo.get_by_task_id(task_id)
+
+    async_result = AsyncResult(task_id, app=celery_app)
+
+    if doc is not None:
+        return TaskStatusResponse(
+            task_id=task_id,
+            status=doc.status,
+            processing_stage=doc.processing_stage or "QUEUED",
+            document_id=str(doc.id),
+            error=doc.error_message,
+            chunk_count=doc.total_chunks,
+            page_count=doc.total_pages,
+        )
+
+    if async_result.state == "SUCCESS" and isinstance(async_result.result, dict):
+        res = async_result.result
+        return TaskStatusResponse(
+            task_id=task_id,
+            status=res.get("status", "COMPLETED"),
+            processing_stage=res.get("processing_stage", "COMPLETED"),
+            document_id=res.get("document_id"),
+            error=res.get("error"),
+            chunk_count=res.get("chunk_count", 0),
+            page_count=res.get("page_count", 0),
+        )
+
+    if async_result.state == "FAILURE":
+        return TaskStatusResponse(
+            task_id=task_id,
+            status="FAILED",
+            processing_stage="FAILED",
+            document_id=None,
+            error=str(async_result.result),
+            chunk_count=0,
+            page_count=0,
+        )
+
+    if async_result.state == "PENDING" and async_result.info is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Task {task_id} not found.",
+        )
+
+    stage = "QUEUED"
+    if isinstance(async_result.info, dict):
+        stage = async_result.info.get("stage", "QUEUED")
+
+    return TaskStatusResponse(
+        task_id=task_id,
+        status=async_result.state,
+        processing_stage=stage,
+        document_id=None,
+        error=None,
+        chunk_count=0,
+        page_count=0,
+    )
 
 
 @router.get("/documents", response_model=list[DocumentRead])

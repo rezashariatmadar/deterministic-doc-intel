@@ -61,6 +61,7 @@ revli-tender-extraction/
 .DS_Store
 
 # Data & Logs
+data/uploads/
 data/raw_corpus/*.pdf
 !data/raw_corpus/manifest.json
 !data/raw_corpus/nvidia_10k_sample.pdf

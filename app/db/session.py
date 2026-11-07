@@ -3,6 +3,7 @@
 import os
 import sys
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from typing import Any
 
 from sqlalchemy.ext.asyncio import (
@@ -58,3 +59,34 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
             raise
         finally:
             await session.close()
+
+
+@asynccontextmanager
+async def get_task_scoped_session() -> AsyncGenerator[AsyncSession, None]:
+    """Yield a task-scoped AsyncSession backed by an isolated NullPool engine.
+
+    Instantiates a dedicated AsyncEngine with poolclass=NullPool inside the
+    current asyncio event loop to ensure complete loop isolation across
+    Celery task executions.
+    """
+    task_engine: AsyncEngine = create_async_engine(
+        settings.DATABASE_URL,
+        poolclass=NullPool,
+        echo=settings.DEBUG,
+    )
+    task_session_maker = async_sessionmaker(
+        task_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autocommit=False,
+        autoflush=False,
+    )
+    async with task_session_maker() as session:
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+    await task_engine.dispose()

@@ -18,6 +18,8 @@ class DocumentBase(BaseModel):
 class DocumentCreate(DocumentBase):
     file_hash: str = Field(..., min_length=64, max_length=64)
     total_pages: int = Field(default=0, ge=0)
+    task_id: str | None = None
+    processing_stage: str | None = None
 
 
 class DocumentRead(DocumentBase):
@@ -33,6 +35,16 @@ class DocumentRead(DocumentBase):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class TaskStatusResponse(BaseModel):
+    task_id: str
+    status: str
+    processing_stage: str | None = None
+    document_id: str | None = None
+    error: str | None = None
+    chunk_count: int = 0
+    page_count: int = 0
 
 
 class ChunkBase(BaseModel):
