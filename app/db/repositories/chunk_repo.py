@@ -60,12 +60,15 @@ class ChunkRepository:
         cosine_distance = DocumentChunk.embedding.cosine_distance(query_vector)
         similarity_score = (1.0 - cosine_distance).label("similarity_score")
 
-        stmt = select(DocumentChunk, similarity_score).options(selectinload(DocumentChunk.document))
+        stmt = (
+            select(DocumentChunk, similarity_score)
+            .join(Document, DocumentChunk.document_id == Document.id)
+            .options(selectinload(DocumentChunk.document))
+            .where(Document.status == "COMPLETED")
+        )
 
         if category:
-            stmt = stmt.join(Document, DocumentChunk.document_id == Document.id).where(
-                Document.category == category
-            )
+            stmt = stmt.where(Document.category == category)
 
         if document_id:
             stmt = stmt.where(DocumentChunk.document_id == document_id)

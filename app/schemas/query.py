@@ -42,6 +42,8 @@ class RetrievedChunk(BaseModel):
         le=1.0,
         description="Cosine similarity score (1 - cosine distance)",
     )
+    bbox: dict[str, Any] | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class QueryRequest(BaseModel):
@@ -66,6 +68,8 @@ class Citation(BaseModel):
     section_path: str
     supporting_quote: str | None = None
     quote: str | None = None
+    bbox: dict[str, Any] | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     def model_post_init(self, __context: Any) -> None:
         if self.supporting_quote is None and self.quote is not None:

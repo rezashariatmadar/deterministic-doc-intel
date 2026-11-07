@@ -242,6 +242,9 @@ class QuoteVerifier:
         q_set = set(q_words)
         q_len = len(q_words)
 
+        if quote_numbers and not quote_numbers.issubset(extract_numeric_tokens(text)):
+            return None
+
         # Fast pre-filter: if chunk has insufficient token overlap with quote, skip sentence search
         chunk_words = set(re.findall(r"\w+", text.lower()))
         if len(q_set & chunk_words) / max(q_len, 1) < 0.35:

@@ -190,6 +190,8 @@ class GroundedGenerator:
                                 section_path=chunk.section_path,
                                 supporting_quote=res.verified_quote,
                                 quote=res.verified_quote,
+                                bbox=chunk.bbox,
+                                metadata=chunk.metadata,
                             )
                         )
                     replacements.append(f"[{effective_id}]")

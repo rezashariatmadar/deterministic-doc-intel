@@ -82,6 +82,8 @@ class VectorSearchService:
                 if chunk.document and chunk.document.title
                 else "Unknown Document"
             )
+            chunk_meta = chunk.metadata if isinstance(chunk.metadata, dict) else {}
+            chunk_bbox = chunk_meta.get("bbox") if isinstance(chunk_meta.get("bbox"), dict) else None
             results.append(
                 RetrievedChunk(
                     source_id=idx,
@@ -95,6 +97,8 @@ class VectorSearchService:
                     text=chunk.raw_text,
                     contextualized_text=chunk.contextualized_text,
                     similarity_score=round(score, 4),
+                    bbox=chunk_bbox,
+                    metadata=chunk_meta,
                 )
             )
 

@@ -333,3 +333,40 @@ async def test_rag_response_downgrades_when_all_citations_fail(
     assert res.confidence_score == 0.0
     assert len(res.citations) == 0
     assert "[unverified: 1]" in res.answer
+
+
+def test_retrieved_chunk_preserves_bbox_and_metadata() -> None:
+    chunk = RetrievedChunk(
+        source_id=1,
+        chunk_id=uuid.uuid4(),
+        document_id=uuid.uuid4(),
+        document_title="Test",
+        page_start=1,
+        page_end=1,
+        section_path="General",
+        element_type="prose",
+        text="Sample text",
+        contextualized_text="[Doc] Sample text",
+        similarity_score=0.9,
+        bbox={"x0": 10.0, "y0": 20.0, "x1": 100.0, "y1": 50.0},
+        metadata={"block_index": 3},
+    )
+    assert chunk.bbox is not None
+    assert chunk.bbox["x0"] == 10.0
+    assert chunk.metadata["block_index"] == 3
+
+
+@pytest.mark.asyncio
+async def test_generator_preserves_citation_bbox_and_metadata(sample_chunks: list[RetrievedChunk]) -> None:
+    sample_chunks[0].bbox = {"x0": 5.0, "y0": 10.0, "x1": 50.0, "y1": 25.0}
+    sample_chunks[0].metadata = {"block_index": 7}
+
+    mock_llm = MockLLMProvider("Data Center revenue rose 217% to $47.5B [1].")
+    generator = GroundedGenerator(llm_provider=mock_llm)
+
+    res = await generator.generate("What was Data Center revenue?", sample_chunks)
+    assert len(res.citations) == 1
+    assert res.citations[0].bbox == {"x0": 5.0, "y0": 10.0, "x1": 50.0, "y1": 25.0}
+    assert res.citations[0].metadata == {"block_index": 7}
+
+
