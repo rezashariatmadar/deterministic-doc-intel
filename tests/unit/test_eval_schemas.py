@@ -117,13 +117,48 @@ def test_golden_dataset_substrings_exist_in_corpus() -> None:
         # Combine text across the candidate files and expected pages
         combined_text = ""
         for p in candidate_paths:
-            doc = pymupdf.open(p)  # type: ignore[no-untyped-call]
-            for page_num in q.expected_pages:
-                if 1 <= page_num <= len(doc):
-                    combined_text += " " + doc[page_num - 1].get_text()  # type: ignore[no-untyped-call]
+            with pymupdf.open(p) as doc:  # type: ignore[no-untyped-call]
+                for page_num in q.expected_pages:
+                    if 1 <= page_num <= len(doc):
+                        combined_text += " " + doc[page_num - 1].get_text()
 
         norm_combined = norm(combined_text)
         for sub in q.required_substrings:
             assert norm(sub) in norm_combined, (
                 f"Query '{q.id}' substring '{sub}' not found on expected pages {q.expected_pages}"
             )
+
+
+def test_golden_dataset_numerical_substrings_in_ground_truth() -> None:
+    """Assert that numerical/monetary required substrings appear in ground_truth_answer."""
+    with open(DATASET_PATH, encoding="utf-8") as f:
+        data = json.load(f)
+
+    dataset = GoldenDataset.model_validate(data)
+
+    # Regex matching monetary/formatted numbers like "5,985", "95,281", "44,301", "6.16", "27.3"
+    num_pattern = re.compile(r"^\d{1,3}(?:,\d{3})+(?:\.\d+)?$|^\d+\.\d+$")
+
+    matched_count = 0
+    for q in dataset.queries:
+        if not q.is_answerable:
+            continue
+
+        # Ensure ground truth answers do not have truncated dollar figures like ",985" or ",675"
+        assert not re.search(r"(?:^|\s),\d{3}", q.ground_truth_answer), (
+            f"Query '{q.id}' ground_truth_answer contains corrupted dollar token: "
+            f"'{q.ground_truth_answer}'"
+        )
+
+        for sub in q.required_substrings:
+            if num_pattern.match(sub.strip()):
+                matched_count += 1
+                assert sub in q.ground_truth_answer, (
+                    f"Numerical substring '{sub}' from query '{q.id}' required_substrings "
+                    f"not found in ground_truth_answer: '{q.ground_truth_answer}'"
+                )
+
+    # Sanity check that we actually checked a significant number of numerical substrings
+    assert matched_count >= 15, (
+        f"Expected at least 15 numerical substrings checked, got {matched_count}"
+    )

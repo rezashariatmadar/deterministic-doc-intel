@@ -18,7 +18,7 @@
         "commercial paper",
         "5,985"
       ],
-      "ground_truth_answer": "As of September 30, 2023, Apple recorded ,985 million (.985 billion) in commercial paper liabilities under current liabilities.",
+      "ground_truth_answer": "As of September 30, 2023, Apple recorded $5,985 million ($5.985 billion) in commercial paper liabilities under current liabilities.",
       "is_answerable": true,
       "metadata": {
         "target_element": "table",
@@ -113,7 +113,7 @@
         "term debt",
         "95,281"
       ],
-      "ground_truth_answer": "Under non-current liabilities, Apple recorded term debt of 5,281 million (5.281 billion) as of September 30, 2023.",
+      "ground_truth_answer": "Under non-current liabilities, Apple recorded term debt of $95,281 million ($95.281 billion) as of September 30, 2023.",
       "is_answerable": true,
       "metadata": {
         "target_element": "table",
@@ -184,7 +184,7 @@
         "weakness in foreign",
         "lower net sales of mac and iphone"
       ],
-      "ground_truth_answer": "Apple's total net sales decreased 3% or 1.0 billion in 2023 compared to 2022. Weakness in foreign currencies relative to the U.S. dollar accounted for more than the entire decrease, coupled with lower net sales of Mac and iPhone, partially offset by higher Services net sales.",
+      "ground_truth_answer": "Apple's total net sales decreased 3% or $11.0 billion in 2023 compared to 2022. Weakness in foreign currencies relative to the U.S. dollar accounted for more than the entire decrease, coupled with lower net sales of Mac and iPhone, partially offset by higher Services net sales.",
       "is_answerable": true,
       "metadata": {
         "target_doc": "Apple 10-K"
@@ -230,7 +230,7 @@
         "data center revenue rose 217%",
         "nvidia hgx"
       ],
-      "ground_truth_answer": "NVIDIA's Data Center revenue surged 217% year-over-year to 7.5 billion in fiscal 2024, driven primarily by strong enterprise demand for the NVIDIA HGX accelerated computing platform for generative AI and LLMs.",
+      "ground_truth_answer": "NVIDIA's Data Center revenue surged 217% year-over-year to $47.5 billion in fiscal 2024, driven primarily by strong enterprise demand for the NVIDIA HGX accelerated computing platform for generative AI and LLMs.",
       "is_answerable": true,
       "metadata": {
         "target_doc": "NVIDIA 10-K"
@@ -300,7 +300,7 @@
         "60,922",
         "383,285"
       ],
-      "ground_truth_answer": "NVIDIA's total revenue in fiscal 2024 was 0,922 million (0.92B), whereas Apple's total net sales in fiscal 2023 was 83,285 million (83.29B), with Apple's revenue being roughly 6.3 times larger than NVIDIA's.",
+      "ground_truth_answer": "NVIDIA's total revenue in fiscal 2024 was $60,922 million ($60.92B), whereas Apple's total net sales in fiscal 2023 was $383,285 million ($383.29B), with Apple's revenue being roughly 6.3 times larger than NVIDIA's.",
       "is_answerable": true,
       "metadata": {
         "target_doc": "NVIDIA 10-K, Apple 10-K"
@@ -373,7 +373,7 @@
         "29,915",
         "8,675"
       ],
-      "ground_truth_answer": "Apple spent 9,915 million (9.92B) on Research and Development in fiscal 2023, while NVIDIA spent ,675 million (.68B) on R&D in fiscal 2024.",
+      "ground_truth_answer": "Apple spent $29,915 million ($29.92B) on Research and Development in fiscal 2023, while NVIDIA spent $8,675 million ($8.68B) on R&D in fiscal 2024.",
       "is_answerable": true,
       "metadata": {
         "target_doc": "Apple 10-K, NVIDIA 10-K"
@@ -395,7 +395,7 @@
         "94,294",
         "72,559"
       ],
-      "ground_truth_answer": "In fiscal year 2023, Apple's net sales were 4,294 million in Europe and 2,559 million in Greater China, with Europe net sales exceeding Greater China by 1,735 million.",
+      "ground_truth_answer": "In fiscal year 2023, Apple's net sales were $94,294 million in Europe and $72,559 million in Greater China, with Europe net sales exceeding Greater China by $21,735 million.",
       "is_answerable": true,
       "metadata": {
         "target_doc": "Apple 10-K"
@@ -440,7 +440,7 @@
         "32,972",
         "29,760"
       ],
-      "ground_truth_answer": "In fiscal year 2024, NVIDIA reported gross profit of 4,301 million, operating income of 2,972 million, and net income of 9,760 million.",
+      "ground_truth_answer": "In fiscal year 2024, NVIDIA reported gross profit of $44,301 million, operating income of $32,972 million, and net income of $29,760 million.",
       "is_answerable": true,
       "metadata": {
         "target_doc": "NVIDIA 10-K"
@@ -462,7 +462,7 @@
         "143,566",
         "352,583"
       ],
-      "ground_truth_answer": "As of September 30, 2023, Apple had total current assets of 43,566 million and total assets of 52,583 million.",
+      "ground_truth_answer": "As of September 30, 2023, Apple had total current assets of $143,566 million and total assets of $352,583 million.",
       "is_answerable": true,
       "metadata": {
         "target_doc": "Apple 10-K"
@@ -485,7 +485,7 @@
         "29,357",
         "85,200"
       ],
-      "ground_truth_answer": "For fiscal year 2023, Apple recorded net sales of 00,583 million for iPhone, 9,357 million for Mac, and 5,200 million for Services.",
+      "ground_truth_answer": "For fiscal year 2023, Apple recorded net sales of $200,583 million for iPhone, $29,357 million for Mac, and $85,200 million for Services.",
       "is_answerable": true,
       "metadata": {
         "target_doc": "Apple 10-K"
@@ -508,7 +508,7 @@
         "1,553",
         "1,091"
       ],
-      "ground_truth_answer": "In fiscal 2024, NVIDIA's revenue by market platform was 0,447 million for Gaming, ,553 million for Professional Visualization, and ,091 million for Automotive.",
+      "ground_truth_answer": "In fiscal 2024, NVIDIA's revenue by market platform was $10,447 million for Gaming, $1,553 million for Professional Visualization, and $1,091 million for Automotive.",
       "is_answerable": true,
       "metadata": {
         "target_doc": "NVIDIA 10-K"
@@ -554,7 +554,7 @@
         "16,741",
         "6.16"
       ],
-      "ground_truth_answer": "For fiscal year 2023, Apple recorded a provision for income taxes of 6,741 million and basic earnings per share of .16.",
+      "ground_truth_answer": "For fiscal year 2023, Apple recorded a provision for income taxes of $16,741 million and basic earnings per share of $6.16.",
       "is_answerable": true,
       "metadata": {
         "target_doc": "Apple 10-K"

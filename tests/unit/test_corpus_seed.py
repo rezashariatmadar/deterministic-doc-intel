@@ -277,6 +277,73 @@ async def test_ingest_corpus_async_dispatch(tmp_path: Path) -> None:
         )
 
 
+@pytest.mark.asyncio
+async def test_ingest_corpus_document_failure_handling(tmp_path: Path) -> None:
+    """Test that ingestion errors for individual documents are recorded and rollback is invoked."""
+    sample_pdf1 = tmp_path / "test_doc1.pdf"
+    sample_pdf1.write_bytes(b"%PDF-1.4 fake pdf 1")
+    sample_sha1 = compute_sha256(sample_pdf1)
+
+    sample_pdf2 = tmp_path / "test_doc2.pdf"
+    sample_pdf2.write_bytes(b"%PDF-1.4 fake pdf 2")
+    sample_sha2 = compute_sha256(sample_pdf2)
+
+    manifest_file = tmp_path / "manifest.json"
+    manifest_data = {
+        "documents": [
+            {
+                "filename": "test_doc1.pdf",
+                "sha256": sample_sha1,
+                "title": "Doc 1",
+                "total_pages": 1,
+            },
+            {
+                "filename": "test_doc2.pdf",
+                "sha256": sample_sha2,
+                "title": "Doc 2",
+                "total_pages": 1,
+            },
+        ]
+    }
+    import json
+
+    manifest_file.write_text(json.dumps(manifest_data), encoding="utf-8")
+
+    fake_session = AsyncMock()
+    mock_doc2 = MagicMock(spec=Document)
+    mock_doc2.id = uuid4()
+    mock_doc2.title = "Doc 2"
+    mock_doc2.total_pages = 1
+    mock_doc2.status = "COMPLETED"
+
+    with (
+        patch("scripts.ingest_corpus.DocumentRepository") as mock_repo_cls,
+        patch(
+            "scripts.ingest_corpus.process_document_ingestion", new_callable=AsyncMock
+        ) as mock_process,
+    ):
+        repo_instance = MagicMock()
+        repo_instance.get_by_hash = AsyncMock(return_value=None)
+        repo_instance.create = AsyncMock(return_value=mock_doc2)
+        mock_repo_cls.return_value = repo_instance
+
+        # First document fails with an error, second document succeeds
+        mock_process.side_effect = [RuntimeError("Simulated extraction error"), mock_doc2]
+
+        summary = await ingest_corpus(
+            manifest_path=manifest_file,
+            dry_run=False,
+            async_mode=False,
+            corpus_dir=tmp_path,
+            session=fake_session,
+        )
+
+        assert summary["ingested"] == 1
+        assert summary["skipped"] == 0
+        assert summary["failed"] == 1
+        fake_session.rollback.assert_awaited()
+
+
 def test_cli_parse_args() -> None:
     """Test CLI argument parsing."""
     args = parse_args(

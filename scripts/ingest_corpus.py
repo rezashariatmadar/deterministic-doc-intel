@@ -6,6 +6,7 @@ and ingests documents into the RAG platform (synchronously or asynchronously via
 
 import argparse
 import asyncio
+import contextlib
 import hashlib
 import json
 import logging
@@ -239,6 +240,8 @@ async def ingest_corpus(
                     ingested += 1
             except Exception as exc:
                 logger.error("Failed to ingest document %s: %s", filename, exc, exc_info=True)
+                with contextlib.suppress(Exception):
+                    await sess.rollback()
                 errors += 1
 
         return ingested, skipped, errors
