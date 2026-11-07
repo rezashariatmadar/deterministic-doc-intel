@@ -94,6 +94,7 @@ async def test_vector_search_executes_and_filters(db_session: AsyncSession) -> N
                 ),
             ]
         )
+        await doc_repo.update_status(doc.id, status="COMPLETED", total_chunks=2)
 
         provider = MockEmbeddingProvider(query_vec=query_vec)
         service = VectorSearchService(session=db_session, embedding_provider=provider)

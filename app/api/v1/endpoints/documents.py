@@ -163,24 +163,38 @@ async def ingest_document(
 
     except AppException as exc:
         if doc is not None:
-            await db.rollback()
-            await doc_repo.update_status(
-                doc_id=doc.id,
-                status="FAILED",
-                error_message=str(exc),
-            )
+            try:
+                await doc_repo.update_status(
+                    doc_id=doc.id,
+                    status="FAILED",
+                    error_message=str(exc),
+                )
+            except Exception:
+                await db.rollback()
+                await doc_repo.update_status(
+                    doc_id=doc.id,
+                    status="FAILED",
+                    error_message=str(exc),
+                )
         raise HTTPException(
             status_code=exc.status_code,
             detail=f"Document ingestion failed: {exc.message}",
         ) from exc
     except Exception as exc:
         if doc is not None:
-            await db.rollback()
-            await doc_repo.update_status(
-                doc_id=doc.id,
-                status="FAILED",
-                error_message=str(exc),
-            )
+            try:
+                await doc_repo.update_status(
+                    doc_id=doc.id,
+                    status="FAILED",
+                    error_message=str(exc),
+                )
+            except Exception:
+                await db.rollback()
+                await doc_repo.update_status(
+                    doc_id=doc.id,
+                    status="FAILED",
+                    error_message=str(exc),
+                )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Document ingestion failed: {exc}",

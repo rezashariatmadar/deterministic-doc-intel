@@ -77,6 +77,8 @@ async def test_document_and_chunk_lifecycle(db_session):
         )
         assert len(chunks) == 2
 
+        await doc_repo.update_status(doc.id, status="COMPLETED", total_chunks=2)
+
         # 4. Search by similarity (cosine distance)
         # Query vector points in the same direction as vec1
         query_vec = [1.0] * half + [0.0] * (dim - half)
