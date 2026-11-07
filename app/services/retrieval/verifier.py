@@ -218,6 +218,13 @@ class QuoteVerifier:
 
         clean_quote = quote.strip()
 
+        # Fast path 0: if quote contains numeric tokens, verify candidate contains them
+        quote_numbers = extract_numeric_tokens(clean_quote)
+        if quote_numbers and not is_numeric_subset(
+            quote_numbers, extract_numeric_tokens(text), text
+        ):
+            return None
+
         # Fast path 1: simple case-fold match for pure ASCII text only (avoids unicode drift)
         if clean_quote.isascii() and text.isascii():
             quote_lower = clean_quote.lower()
