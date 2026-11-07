@@ -247,7 +247,7 @@ class QuoteVerifier:
         if len(q_set & chunk_words) / max(q_len, 1) < 0.35:
             return None
 
-        sentence_matches = list(re.finditer(r"[^.!?\n]+(?:[.!?\n]+|$)", text))
+        sentence_matches = list(re.finditer(r"(?:[^\n.!?]|(?<=\d)\.(?=\d))+", text))
         if not sentence_matches:
             return None
 
@@ -336,6 +336,29 @@ class QuoteVerifier:
 
         return None
 
+    def _verify_table_claim(self, claim: str, table_text: str) -> str | None:
+        """Verify natural language claim against structured markdown table cells."""
+        claim_nums = extract_numeric_tokens(claim)
+        table_nums = extract_numeric_tokens(table_text)
+        if claim_nums and not claim_nums.issubset(table_nums):
+            return None
+
+        lines = [line.strip() for line in table_text.splitlines() if line.strip() and not line.startswith("|-") and not line.startswith("| -") and not set(line.replace("|", "").strip()) <= {"-", " "}]
+        if not lines:
+            return None
+
+        header_tokens = set(re.findall(r"\w+", lines[0].lower()))
+        claim_tokens = set(re.findall(r"\w+", claim.lower()))
+
+        for row in lines[1:]:
+            row_tokens = set(re.findall(r"\w+", row.lower()))
+            row_nums = extract_numeric_tokens(row)
+            if (claim_nums and claim_nums.intersection(row_nums)) or (claim_tokens & row_tokens):
+                overlap = claim_tokens & (row_tokens | header_tokens)
+                if len(overlap) >= min(2, len(claim_tokens)):
+                    return row
+        return None
+
     def verify_citation(
         self,
         claim_or_quote: str,
@@ -402,6 +425,36 @@ class QuoteVerifier:
                 rehomed_source_id=None,
                 match_tier="fuzzy",
             )
+
+        # Contextualized text fallback (verifies breadcrumb metadata such as year, section, document title)
+        if primary_chunk.contextualized_text and primary_chunk.contextualized_text != primary_chunk.text:
+            context_norm = self._normalized_match(clean_quote, primary_chunk.contextualized_text)
+            if context_norm is not None:
+                return VerificationResult(
+                    is_verified=True,
+                    verified_quote=context_norm,
+                    rehomed_source_id=None,
+                    match_tier="normalized",
+                )
+            context_fuzzy = self._fuzzy_match(clean_quote, primary_chunk.contextualized_text)
+            if context_fuzzy is not None:
+                return VerificationResult(
+                    is_verified=True,
+                    verified_quote=context_fuzzy,
+                    rehomed_source_id=None,
+                    match_tier="fuzzy",
+                )
+
+        # Structured table claim verification
+        if primary_chunk.element_type == "table":
+            table_row = self._verify_table_claim(clean_quote, primary_chunk.text)
+            if table_row is not None:
+                return VerificationResult(
+                    is_verified=True,
+                    verified_quote=table_row,
+                    rehomed_source_id=None,
+                    match_tier="table",
+                )
 
         # Tier 4: cross-chunk re-homing across other candidate chunks
         if candidate_chunks:

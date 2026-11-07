@@ -15,6 +15,8 @@ def make_chunk(
     source_id: int,
     text: str,
     title: str = "Test Document",
+    contextualized: str | None = None,
+    element_type: str = "prose",
 ) -> RetrievedChunk:
     """Helper to construct a RetrievedChunk for verifier tests."""
     return RetrievedChunk(
@@ -25,9 +27,9 @@ def make_chunk(
         page_start=1,
         page_end=1,
         section_path="Section > Item",
-        element_type="prose",
+        element_type=element_type,
         text=text,
-        contextualized_text=f"[{title}] {text}",
+        contextualized_text=contextualized if contextualized is not None else f"[{title}] {text}",
         similarity_score=0.90,
     )
 
@@ -416,4 +418,24 @@ def test_partial_number_substring_rejected() -> None:
     verifier = QuoteVerifier()
     res = verifier.verify_citation("Total revenue rose to $47", chunk, [chunk])
     assert not res.is_verified
+
+
+def test_verifier_accepts_breadcrumb_year() -> None:
+    chunk = make_chunk(
+        1,
+        text="Data Center revenue was $47.5B.",
+        contextualized="[Document: Form 10-K 2024 | Section: Item 7] Data Center revenue was $47.5B.",
+    )
+    verifier = QuoteVerifier()
+    res = verifier.verify_citation("In 2024, Data Center revenue was $47.5B", chunk, [chunk])
+    assert res.is_verified
+
+
+def test_verifier_verifies_table_row_claim() -> None:
+    table_text = "| Segment | Fiscal 2024 |\n|---|---|\n| Automotive | $1,091 |"
+    chunk = make_chunk(1, text=table_text, element_type="table")
+    verifier = QuoteVerifier()
+    res = verifier.verify_citation("Automotive revenue was $1,091 in Fiscal 2024", chunk, [chunk])
+    assert res.is_verified
+
 

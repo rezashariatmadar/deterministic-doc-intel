@@ -35,12 +35,14 @@ class GroundedGenerator:
         """Format retrieved chunks into structured XML with clear source IDs."""
         xml_parts: list[str] = ["<sources>"]
         for chunk in chunks:
+            # Use raw chunk text inside body to avoid duplicating metadata already present in attributes
+            body_text = chunk.text if chunk.text else chunk.contextualized_text
             part = (
                 f'  <source id="{chunk.source_id}" '
                 f'document="{chunk.document_title}" '
                 f'section="{chunk.section_path}" '
                 f'pages="{chunk.page_start}-{chunk.page_end}">\n'
-                f"    {chunk.contextualized_text}\n"
+                f"    {body_text}\n"
                 f"  </source>"
             )
             xml_parts.append(part)
