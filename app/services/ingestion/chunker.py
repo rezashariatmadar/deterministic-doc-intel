@@ -130,7 +130,9 @@ class DocumentChunker:
                 continue
 
             # 3. Handle Prose elements
-            breadcrumb = f"[Document: {doc.title} | Section: {current_section} | Page: {el.page_number}]"
+            breadcrumb = (
+                f"[Document: {doc.title} | Section: {current_section} | Page: {el.page_number}]"
+            )
             header_tokens = self.count_tokens(f"{breadcrumb} ")
             max_content_tokens = (
                 max(1, self.target_tokens - header_tokens)

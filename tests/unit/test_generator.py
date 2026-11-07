@@ -357,7 +357,9 @@ def test_retrieved_chunk_preserves_bbox_and_metadata() -> None:
 
 
 @pytest.mark.asyncio
-async def test_generator_preserves_citation_bbox_and_metadata(sample_chunks: list[RetrievedChunk]) -> None:
+async def test_generator_preserves_citation_bbox_and_metadata(
+    sample_chunks: list[RetrievedChunk],
+) -> None:
     sample_chunks[0].bbox = {"x0": 5.0, "y0": 10.0, "x1": 50.0, "y1": 25.0}
     sample_chunks[0].metadata = {"block_index": 7}
 
@@ -368,5 +370,3 @@ async def test_generator_preserves_citation_bbox_and_metadata(sample_chunks: lis
     assert len(res.citations) == 1
     assert res.citations[0].bbox == {"x0": 5.0, "y0": 10.0, "x1": 50.0, "y1": 25.0}
     assert res.citations[0].metadata == {"block_index": 7}
-
-

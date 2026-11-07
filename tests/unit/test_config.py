@@ -159,6 +159,7 @@ def test_cors_configuration_validity():
 def test_phase2_settings_and_query_schemas():
     import uuid
     from datetime import datetime
+
     from app.schemas.document import ParentChunkCreate, ParentChunkRead
     from app.schemas.query import QueryRequest, RetrievedChunk
 
@@ -241,4 +242,3 @@ def test_phase2_settings_and_query_schemas():
         created_at=datetime.now(),
     )
     assert p_read.id == p_id
-

@@ -28,11 +28,18 @@ async def query_rag(
     search_service = VectorSearchService(
         session=db,
         embedding_provider=embedding_provider,
+        llm_provider=llm_provider,
     )
     chunks = await search_service.search(
         query=request.query,
         filters=request.filters,
         top_k=request.top_k,
+        search_mode=request.search_mode,
+        weight_dense=request.weight_dense,
+        weight_sparse=request.weight_sparse,
+        enable_reranker=request.enable_reranker,
+        enable_query_rewrite=request.enable_query_rewrite,
+        enable_hyde=request.enable_hyde,
     )
 
     generator = GroundedGenerator(llm_provider=llm_provider)
@@ -50,11 +57,18 @@ async def stream_query_rag(
     search_service = VectorSearchService(
         session=db,
         embedding_provider=embedding_provider,
+        llm_provider=llm_provider,
     )
     chunks = await search_service.search(
         query=request.query,
         filters=request.filters,
         top_k=request.top_k,
+        search_mode=request.search_mode,
+        weight_dense=request.weight_dense,
+        weight_sparse=request.weight_sparse,
+        enable_reranker=request.enable_reranker,
+        enable_query_rewrite=request.enable_query_rewrite,
+        enable_hyde=request.enable_hyde,
     )
     # Release DB connection immediately so connection pool is not starved during LLM streaming
     await db.close()

@@ -97,6 +97,7 @@ async def test_document_and_chunk_lifecycle(db_session):
 @pytest.mark.asyncio
 async def test_parent_chunk_and_search_vector_generation(db_session):
     from sqlalchemy import select
+
     from app.db.models.chunk import DocumentChunk
     from app.db.models.parent_chunk import ParentChunk
 
@@ -173,4 +174,3 @@ async def test_parent_chunk_and_search_vector_generation(db_session):
         parent_stmt = select(ParentChunk).where(ParentChunk.id == parent.id)
         parent_res = await db_session.execute(parent_stmt)
         assert parent_res.scalar_one_or_none() is None
-

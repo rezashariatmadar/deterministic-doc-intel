@@ -184,9 +184,11 @@ def test_chunker_splits_oversized_sentence_without_punctuation() -> None:
 def test_no_ghost_chunk_after_large_paragraph_at_eof() -> None:
     chunker = DocumentChunker(target_tokens=50, overlap_tokens=10)
     large_text = "word " * 50
-    doc = ParsedDocument(title="Doc", total_pages=1, elements=[
-        StructuralElement(element_type="prose", text=large_text.strip(), page_number=1)
-    ])
+    doc = ParsedDocument(
+        title="Doc",
+        total_pages=1,
+        elements=[StructuralElement(element_type="prose", text=large_text.strip(), page_number=1)],
+    )
     chunks = chunker.chunk_document(doc)
     assert len(chunks) == 2
     assert chunks[-1].raw_text != chunks[-2].raw_text
@@ -202,11 +204,19 @@ def test_chunk_document_hierarchical_preserves_table_headers_and_parent_links() 
     # 2. Large table with 20 rows (~400 tokens)
     header = "| Platform | Q1 Revenue | Q2 Revenue | Q3 Revenue | Q4 Revenue |"
     sep = "|---|---|---|---|---|"
-    rows = [f"| Platform_{i:02d} | ${i * 10}M | ${i * 12}M | ${i * 15}M | ${i * 18}M |" for i in range(20)]
+    rows = [
+        f"| Platform_{i:02d} | ${i * 10}M | ${i * 12}M | ${i * 15}M | ${i * 18}M |"
+        for i in range(20)
+    ]
     table_text = "\n".join([header, sep, *rows])
 
     elements = [
-        StructuralElement(element_type="heading", text="Item 7. Financial Condition", page_number=1, heading_level=1),
+        StructuralElement(
+            element_type="heading",
+            text="Item 7. Financial Condition",
+            page_number=1,
+            heading_level=1,
+        ),
         StructuralElement(element_type="prose", text=long_prose, page_number=1),
         StructuralElement(element_type="table", text=table_text, page_number=2),
     ]
@@ -229,7 +239,9 @@ def test_chunk_document_hierarchical_preserves_table_headers_and_parent_links() 
     # Validate child chunks
     assert len(result.children) > len(result.parents)
     child_indices = [c.chunk_index for _, c in result.children]
-    assert child_indices == list(range(len(result.children))), "Child chunk indices must be strictly sequential"
+    assert child_indices == list(range(len(result.children))), (
+        "Child chunk indices must be strictly sequential"
+    )
 
     # Validate table child chunks preserve header and separator
     table_children = [c for p_idx, c in result.children if c.element_type == "table"]
@@ -242,5 +254,3 @@ def test_chunk_document_hierarchical_preserves_table_headers_and_parent_links() 
     # Validate all parent indices are valid
     for p_idx, _ in result.children:
         assert 0 <= p_idx < len(result.parents)
-
-

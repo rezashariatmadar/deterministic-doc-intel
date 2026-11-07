@@ -178,7 +178,10 @@ class QuoteVerifier:
                     break
                 end = pos + len(clean_quote)
                 is_num_cont = False
-                if end < len(text) and (text[end].isdigit() or (text[end] in (".", ",") and end + 1 < len(text) and text[end + 1].isdigit())):
+                if end < len(text) and (
+                    text[end].isdigit()
+                    or (text[end] in (".", ",") and end + 1 < len(text) and text[end + 1].isdigit())
+                ):
                     is_num_cont = True
                 if pos > 0 and text[pos - 1].isdigit():
                     is_num_cont = True
@@ -203,7 +206,14 @@ class QuoteVerifier:
             start_orig = char_map[norm_pos]
             end_orig = char_map[norm_pos + len(norm_quote) - 1] + 1
             is_num_cont = False
-            if end_orig < len(text) and (text[end_orig].isdigit() or (text[end_orig] in (".", ",") and end_orig + 1 < len(text) and text[end_orig + 1].isdigit())):
+            if end_orig < len(text) and (
+                text[end_orig].isdigit()
+                or (
+                    text[end_orig] in (".", ",")
+                    and end_orig + 1 < len(text)
+                    and text[end_orig + 1].isdigit()
+                )
+            ):
                 is_num_cont = True
             if start_orig > 0 and text[start_orig - 1].isdigit():
                 is_num_cont = True
@@ -346,7 +356,14 @@ class QuoteVerifier:
         if claim_nums and not claim_nums.issubset(table_nums):
             return None
 
-        lines = [line.strip() for line in table_text.splitlines() if line.strip() and not line.startswith("|-") and not line.startswith("| -") and not set(line.replace("|", "").strip()) <= {"-", " "}]
+        lines = [
+            line.strip()
+            for line in table_text.splitlines()
+            if line.strip()
+            and not line.startswith("|-")
+            and not line.startswith("| -")
+            and not set(line.replace("|", "").strip()) <= {"-", " "}
+        ]
         if not lines:
             return None
 
@@ -392,7 +409,14 @@ class QuoteVerifier:
                 break
             end = pos + len(clean_quote)
             is_num_cont = False
-            if end < len(primary_chunk.text) and (primary_chunk.text[end].isdigit() or (primary_chunk.text[end] in (".", ",") and end + 1 < len(primary_chunk.text) and primary_chunk.text[end + 1].isdigit())):
+            if end < len(primary_chunk.text) and (
+                primary_chunk.text[end].isdigit()
+                or (
+                    primary_chunk.text[end] in (".", ",")
+                    and end + 1 < len(primary_chunk.text)
+                    and primary_chunk.text[end + 1].isdigit()
+                )
+            ):
                 is_num_cont = True
             if pos > 0 and primary_chunk.text[pos - 1].isdigit():
                 is_num_cont = True
@@ -430,7 +454,10 @@ class QuoteVerifier:
             )
 
         # Contextualized text fallback (verifies breadcrumb metadata such as year, section, document title)
-        if primary_chunk.contextualized_text and primary_chunk.contextualized_text != primary_chunk.text:
+        if (
+            primary_chunk.contextualized_text
+            and primary_chunk.contextualized_text != primary_chunk.text
+        ):
             context_norm = self._normalized_match(clean_quote, primary_chunk.contextualized_text)
             if context_norm is not None:
                 return VerificationResult(

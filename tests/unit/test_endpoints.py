@@ -1,6 +1,5 @@
 """Unit tests for API endpoints logic (health status, SSE verification payload, document concurrency)."""
 
-import pytest
 from fastapi import status
 
 from app.api.v1.endpoints.health import determine_health_status
@@ -73,4 +72,3 @@ def test_verification_payload_structure() -> None:
     assert payload["is_answerable"] is True
     assert payload["citations"][0]["bbox"] == {"x0": 1.0, "y0": 2.0, "x1": 3.0, "y1": 4.0}
     assert payload["citations"][0]["metadata"] == {"block_index": 5}
-

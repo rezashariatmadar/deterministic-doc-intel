@@ -1,6 +1,5 @@
 """Unit tests for CrossEncoderReranker, Sigmoid normalization, and Circuit Breaker."""
 
-import asyncio
 import time
 import uuid
 from unittest.mock import MagicMock

@@ -239,4 +239,3 @@ async def test_search_lexical_and_parent_retrieval(db_session: AsyncSession) -> 
 
     finally:
         await doc_repo.delete(doc.id)
-

@@ -398,6 +398,7 @@ def test_verifier_strips_breadcrumb_headers_before_matching() -> None:
 
 def test_numeric_token_extraction_units_and_signs() -> None:
     from app.services.retrieval.verifier import extract_numeric_tokens
+
     tokens = extract_numeric_tokens("Earned $100M, $47.5B, -32% margin, +15% growth, $47,525M.")
     assert "100m" in tokens
     assert "47.5b" in tokens
@@ -437,5 +438,3 @@ def test_verifier_verifies_table_row_claim() -> None:
     verifier = QuoteVerifier()
     res = verifier.verify_citation("Automotive revenue was $1,091 in Fiscal 2024", chunk, [chunk])
     assert res.is_verified
-
-

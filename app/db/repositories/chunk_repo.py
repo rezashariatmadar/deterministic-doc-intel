@@ -43,9 +43,7 @@ class ChunkRepository:
             await self.session.commit()
         return records
 
-    async def bulk_create_parents(
-        self, parents_in: list[ParentChunkCreate]
-    ) -> list[ParentChunk]:
+    async def bulk_create_parents(self, parents_in: list[ParentChunkCreate]) -> list[ParentChunk]:
         """Atomically insert a batch of parent chunks into PostgreSQL."""
         records = [
             ParentChunk(
@@ -137,7 +135,9 @@ class ChunkRepository:
             return []
 
         ts_query = func.websearch_to_tsquery("english", query)
-        lexical_score = func.ts_rank_cd(DocumentChunk.search_vector, ts_query, 32).label("lexical_score")
+        lexical_score = func.ts_rank_cd(DocumentChunk.search_vector, ts_query, 32).label(
+            "lexical_score"
+        )
 
         stmt = (
             select(DocumentChunk, lexical_score)
@@ -168,9 +168,7 @@ class ChunkRepository:
         rows = result.all()
         return [(row[0], float(row[1])) for row in rows]
 
-    async def get_parents_by_ids(
-        self, parent_ids: list[UUID]
-    ) -> dict[UUID, ParentChunk]:
+    async def get_parents_by_ids(self, parent_ids: list[UUID]) -> dict[UUID, ParentChunk]:
         """Fetch parent chunks in batch by their UUIDs."""
         if not parent_ids:
             return {}
