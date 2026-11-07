@@ -82,7 +82,10 @@ async def test_vector_search_executes_and_filters(db_session: AsyncSession) -> N
                 ChunkCreate(
                     document_id=doc.id,
                     chunk_index=1,
-                    raw_text="The board consists of 12 directors serving annual terms.",
+                    raw_text=(
+                        "Overview of Board: "
+                        "The board consists of 12 directors serving annual terms."
+                    ),
                     contextualized_text="[Doc: NVIDIA 10-K] Board structure details.",
                     token_count=10,
                     page_start=80,
@@ -161,8 +164,11 @@ async def test_search_lexical_and_parent_retrieval(db_session: AsyncSession) -> 
                 ParentChunkCreate(
                     document_id=doc.id,
                     parent_index=0,
-                    raw_text="Overview of Board: The board consists of 12 directors serving annual terms.",
-                    contextualized_text="[Doc: Lexical] Overview of Board: The board consists of 12 directors.",
+                    raw_text=(
+                        "Overview of Board: "
+                        "The board consists of 12 directors serving annual terms."
+                    ),
+                    contextualized_text="[Doc: Lexical] The board consists of 12 directors.",
                     token_count=25,
                     page_start=1,
                     page_end=1,
@@ -182,8 +188,14 @@ async def test_search_lexical_and_parent_retrieval(db_session: AsyncSession) -> 
                     document_id=doc.id,
                     parent_chunk_id=parent_id,
                     chunk_index=0,
-                    raw_text="The board consists of 12 directors serving annual terms.",
-                    contextualized_text="[Doc: Lexical | Section: Item 10 > Governance] The board consists of 12 directors.",
+                    raw_text=(
+                        "Overview of Board: "
+                        "The board consists of 12 directors serving annual terms."
+                    ),
+                    contextualized_text=(
+                        "[Doc: Lexical | Section: Item 10 > Governance] "
+                        "The board consists of 12 directors."
+                    ),
                     token_count=15,
                     page_start=1,
                     page_end=1,
@@ -196,7 +208,10 @@ async def test_search_lexical_and_parent_retrieval(db_session: AsyncSession) -> 
                     document_id=doc.id,
                     chunk_index=1,
                     raw_text="Cloud compute infrastructure reached $47.5B in quarterly billing.",
-                    contextualized_text="[Doc: Lexical | Section: Item 7] Cloud compute infrastructure reached $47.5B.",
+                    contextualized_text=(
+                        "[Doc: Lexical | Section: Item 7] "
+                        "Cloud compute infrastructure reached $47.5B."
+                    ),
                     token_count=15,
                     page_start=2,
                     page_end=2,

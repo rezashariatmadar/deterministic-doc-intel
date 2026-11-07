@@ -425,7 +425,7 @@ def test_verifier_accepts_breadcrumb_year() -> None:
     chunk = make_chunk(
         1,
         text="Data Center revenue was $47.5B.",
-        contextualized="[Document: Form 10-K 2024 | Section: Item 7] Data Center revenue was $47.5B.",
+        contextualized="[Doc: 10-K 2024 | Section: Item 7] Data Center revenue was $47.5B.",
     )
     verifier = QuoteVerifier()
     res = verifier.verify_citation("In 2024, Data Center revenue was $47.5B", chunk, [chunk])

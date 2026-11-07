@@ -1,4 +1,4 @@
-"""Unit tests for API endpoints logic (health status, SSE verification payload, document concurrency)."""
+"""Unit tests for API endpoints logic (health status, SSE verification, document concurrency)."""
 
 from fastapi import status
 
@@ -70,5 +70,5 @@ def test_verification_payload_structure() -> None:
 
     assert payload["verified_answer"] == "The revenue grew to $47.5B [1]."
     assert payload["is_answerable"] is True
-    assert payload["citations"][0]["bbox"] == {"x0": 1.0, "y0": 2.0, "x1": 3.0, "y1": 4.0}
-    assert payload["citations"][0]["metadata"] == {"block_index": 5}
+    assert citations_payload[0]["bbox"] == {"x0": 1.0, "y0": 2.0, "x1": 3.0, "y1": 4.0}
+    assert citations_payload[0]["metadata"] == {"block_index": 5}

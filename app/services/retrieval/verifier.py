@@ -31,7 +31,10 @@ _NUMERIC_TOKEN_PATTERN = re.compile(
 
 
 def extract_numeric_tokens(text: str) -> set[str]:
-    """Extract normalized numeric tokens (commas removed, decimals and financial/percentage suffixes preserved)."""
+    """
+    Extract normalized numeric tokens
+    (commas removed, decimals and financial/percentage suffixes preserved).
+    """
     raw_nums = _NUMERIC_TOKEN_PATTERN.findall(text)
     tokens: set[str] = set()
     for n in raw_nums:
@@ -82,10 +85,7 @@ def normalize_with_mapping(text: str) -> tuple[str, list[int]]:
             if j < len(text) and text[j].isdigit():
                 is_attached_sign = True
 
-        if is_pure_ascii:
-            norm_chars = char
-        else:
-            norm_chars = unicodedata.normalize("NFKC", char)
+        norm_chars = char if is_pure_ascii else unicodedata.normalize("NFKC", char)
 
         for nc in norm_chars:
             if is_attached_sign and nc in ("-", "−", "+"):
@@ -453,7 +453,7 @@ class QuoteVerifier:
                 match_tier="fuzzy",
             )
 
-        # Contextualized text fallback (verifies breadcrumb metadata such as year, section, document title)
+        # Contextualized text fallback (verifies breadcrumbs: year, section, document title)
         if (
             primary_chunk.contextualized_text
             and primary_chunk.contextualized_text != primary_chunk.text

@@ -62,7 +62,7 @@ async def test_reranker_reorders_and_reindexes_chunks() -> None:
     assert len(reranked) == 2
     assert reranked[0].text == c2.text
     assert reranked[0].source_id == 1
-    assert reranked[0].rerank_score > 0.9
+    assert reranked[0].rerank_score is not None and reranked[0].rerank_score > 0.9
 
     # c1 must be rank 2 and re-indexed to source_id 2
     assert reranked[1].text == c1.text
@@ -80,7 +80,7 @@ async def test_reranker_circuit_breaker_on_timeout() -> None:
     # Mock model that sleeps longer than timeout_ms
     mock_model = MagicMock()
 
-    def slow_predict(pairs: list) -> list[float]:
+    def slow_predict(pairs: list[tuple[str, str]]) -> list[float]:
         time.sleep(0.15)
         return [2.0, 1.0]
 

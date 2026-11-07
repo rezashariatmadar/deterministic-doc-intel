@@ -83,15 +83,16 @@ def test_parser_preserves_paragraph_cohesion_and_hyphenation() -> None:
 def test_parser_rejects_password_protected_pdf(tmp_path: Path) -> None:
     # Create an encrypted PDF requiring a password
     pdf_path = tmp_path / "encrypted.pdf"
-    doc = fitz.open()
+    encryption_flag = getattr(fitz, "PDF_ENCRYPT_AES_256", 4)
+    doc = fitz.open()  # type: ignore[no-untyped-call]
     doc.new_page()
-    doc.save(
+    doc.save(  # type: ignore[no-untyped-call]
         str(pdf_path),
-        encryption=fitz.PDF_ENCRYPT_AES_256,
+        encryption=encryption_flag,
         user_pw="secret123",
         owner_pw="master123",
     )
-    doc.close()
+    doc.close()  # type: ignore[no-untyped-call]
 
     parser = PDFLayoutParser()
     with pytest.raises(DocumentParsingError) as exc_info:

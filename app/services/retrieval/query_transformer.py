@@ -59,13 +59,15 @@ class QueryTransformer:
         )
 
         prompt = (
-            "You are a search query optimizer for a technical & financial document retrieval system.\n"
+            "You are a search query optimizer for a technical & financial document retrieval "
+            "system.\n"
             "Analyze the user query and output a strict JSON object with these fields:\n"
-            '1. "semantic_query": An expanded, clear natural language query optimal for vector embedding.\n'
-            '2. "lexical_query": Essential keywords, exact terms in quotes, entities, and numerical '
-            "identifiers optimal for BM25 keyword search.\n"
-            '3. "sub_queries": A list of 1 to 3 distinct sub-questions if the query is multi-part or '
-            "comparative. If the query is simple, provide just the original query.\n"
+            '1. "semantic_query": An expanded, clear natural language query optimal for vector '
+            "embedding.\n"
+            '2. "lexical_query": Essential keywords, exact terms in quotes, entities, and '
+            "numerical identifiers optimal for BM25 keyword search.\n"
+            '3. "sub_queries": A list of 1 to 3 distinct sub-questions if the query is multi-part '
+            "or comparative. If the query is simple, provide just the original query.\n"
             f"{hyde_prompt}\n\n"
             f"User Query: {clean_q}\n\n"
             "Output ONLY valid JSON:"

@@ -1,7 +1,6 @@
 """Hybrid retrieval service with RRF fusion, Cross-Encoder reranking, and parent resolution."""
 
-from typing import Any
-from uuid import UUID
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +11,9 @@ from app.services.providers.base import EmbeddingProvider, LLMProvider
 from app.services.retrieval.query_transformer import QueryTransformer
 from app.services.retrieval.reranker import CrossEncoderReranker
 from app.services.retrieval.rrf import reciprocal_rank_fusion
+
+if TYPE_CHECKING:
+    from uuid import UUID
 
 
 class VectorSearchService:

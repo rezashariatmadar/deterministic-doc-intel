@@ -68,7 +68,7 @@ async def ingest_document(
         if existing_doc.status in ("PENDING", "PROCESSING"):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"Document ingestion is currently in progress (status: {existing_doc.status}).",
+                detail=f"Ingestion is currently in progress (status: {existing_doc.status}).",
             )
         # Previous attempt failed or was incomplete; purge it to reprocess cleanly
         await doc_repo.delete(existing_doc.id)

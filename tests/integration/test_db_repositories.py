@@ -120,7 +120,7 @@ async def test_parent_chunk_and_search_vector_generation(db_session):
         parent = ParentChunk(
             document_id=doc.id,
             parent_index=0,
-            raw_text="Full Section: Data Center revenue surged due to accelerated computing demand.",
+            raw_text="Full Section: Data Center revenue surged due to AI demand.",
             contextualized_text="[Doc: NVIDIA 10-K] Full Section: Data Center revenue surged.",
             token_count=100,
             page_start=1,
@@ -163,7 +163,7 @@ async def test_parent_chunk_and_search_vector_generation(db_session):
         saved_chunk = result.scalar_one()
 
         assert saved_chunk.search_vector is not None
-        # TSVECTOR string representation in Postgres contains stemmed lexemes like 'center', 'revenu', 'surg'
+        # TSVECTOR in Postgres contains stemmed lexemes like 'center', 'revenu', 'surg'
         sv_str = str(saved_chunk.search_vector)
         assert "center" in sv_str
         assert "revenu" in sv_str

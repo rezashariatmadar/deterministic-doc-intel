@@ -1,6 +1,7 @@
 """Unit tests for Reciprocal Rank Fusion (RRF) algorithm and edge cases."""
 
 import uuid
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -69,7 +70,7 @@ def test_rrf_combines_dense_and_sparse_with_correct_math() -> None:
 def test_rrf_pure_dense_mode() -> None:
     c1, c2 = make_mock_chunk(), make_mock_chunk()
     dense_results = [(c1, 0.9), (c2, 0.8)]
-    sparse_results = []
+    sparse_results: list[tuple[Any, float]] = []
 
     fused = reciprocal_rank_fusion(
         dense_results=dense_results,
@@ -86,7 +87,7 @@ def test_rrf_pure_dense_mode() -> None:
 
 def test_rrf_pure_sparse_mode() -> None:
     c1, c2 = make_mock_chunk(), make_mock_chunk()
-    dense_results = []
+    dense_results: list[tuple[Any, float]] = []
     sparse_results = [(c2, 12.0), (c1, 8.0)]
 
     fused = reciprocal_rank_fusion(
