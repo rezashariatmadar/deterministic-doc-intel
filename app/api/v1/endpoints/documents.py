@@ -103,18 +103,32 @@ async def ingest_document(
         staging_dir = Path("data/uploads")
         staging_dir.mkdir(parents=True, exist_ok=True)
         staging_path = staging_dir / f"{doc.id}{suffix}"
-        staging_path.write_bytes(content)
 
-        task = ingest_document_task.delay(str(doc.id), str(staging_path))
-        updated_doc = await doc_repo.update_status(
-            doc_id=doc.id,
-            status="PENDING",
-            processing_stage="QUEUED",
-            task_id=task.id,
-        )
-        assert updated_doc is not None
-        response.status_code = status.HTTP_202_ACCEPTED
-        return DocumentRead.model_validate(updated_doc)
+        try:
+            staging_path.write_bytes(content)
+            task = ingest_document_task.delay(str(doc.id), str(staging_path))
+            updated_doc = await doc_repo.update_status(
+                doc_id=doc.id,
+                status="PENDING",
+                processing_stage="QUEUED",
+                task_id=task.id,
+            )
+            assert updated_doc is not None
+            response.status_code = status.HTTP_202_ACCEPTED
+            return DocumentRead.model_validate(updated_doc)
+        except Exception as exc:
+            if staging_path.exists():
+                staging_path.unlink()
+            await doc_repo.update_status(
+                doc_id=doc.id,
+                status="FAILED",
+                processing_stage="FAILED",
+                error_message=str(exc),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to dispatch background ingestion: {exc}",
+            ) from exc
 
     # Synchronous ingestion (default)
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
@@ -176,6 +190,16 @@ async def get_task_status(
     async_result = AsyncResult(task_id, app=celery_app)
 
     if doc is not None:
+        if doc.status in ("PENDING", "PROCESSING") and async_result.state == "FAILURE":
+            return TaskStatusResponse(
+                task_id=task_id,
+                status="FAILED",
+                processing_stage="FAILED",
+                document_id=str(doc.id),
+                error=doc.error_message or str(async_result.result),
+                chunk_count=doc.total_chunks,
+                page_count=doc.total_pages,
+            )
         return TaskStatusResponse(
             task_id=task_id,
             status=doc.status,

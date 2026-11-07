@@ -158,3 +158,84 @@ async def test_task_polling_nonexistent_task(async_client: AsyncClient) -> None:
     unknown_task_id = f"unknown-task-{uuid4()}"
     resp = await async_client.get(f"/api/v1/documents/tasks/{unknown_task_id}")
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_async_ingestion_worker_failure_state(async_client: AsyncClient) -> None:
+    """Verify that when Celery worker fails, polling returns status FAILED with error details."""
+    pdf_path = "data/raw_corpus/nvidia_10k_sample.pdf"
+    assert os.path.exists(pdf_path)
+
+    with open(pdf_path, "rb") as f:
+        content = f.read() + f"\n% async-fail-{uuid4()}\n".encode()
+
+    filename = f"test_async_fail_{uuid4().hex[:8]}.pdf"
+    fake_task_id = f"task-{uuid4()}"
+
+    mock_async_result = MagicMock()
+    mock_async_result.id = fake_task_id
+
+    patch_target = "app.api.v1.endpoints.documents.ingest_document_task.delay"
+    with patch(patch_target, return_value=mock_async_result):
+        resp = await async_client.post(
+            "/api/v1/documents/ingest?async_mode=true",
+            files={"file": (filename, content, "application/pdf")},
+            data={"category": "test_async_fail"},
+        )
+        assert resp.status_code == 202
+        doc_id = resp.json()["id"]
+
+    try:
+        # Mock Celery AsyncResult returning FAILURE state before DB update
+        mock_celery_result = MagicMock()
+        mock_celery_result.state = "FAILURE"
+        mock_celery_result.result = RuntimeError("Worker out of memory")
+
+        with patch("app.api.v1.endpoints.documents.AsyncResult", return_value=mock_celery_result):
+            poll_resp = await async_client.get(f"/api/v1/documents/tasks/{fake_task_id}")
+            assert poll_resp.status_code == 200
+            poll_data = poll_resp.json()
+            assert poll_data["task_id"] == fake_task_id
+            assert poll_data["status"] == "FAILED"
+            assert poll_data["processing_stage"] == "FAILED"
+            assert "Worker out of memory" in poll_data["error"]
+    finally:
+        await async_client.delete(f"/api/v1/documents/{doc_id}")
+
+
+@pytest.mark.asyncio
+async def test_async_ingestion_dispatch_failure_resilience(async_client: AsyncClient) -> None:
+    """Verify dispatch exception marks document FAILED and allows subsequent re-ingestion."""
+    pdf_path = "data/raw_corpus/nvidia_10k_sample.pdf"
+    assert os.path.exists(pdf_path)
+
+    with open(pdf_path, "rb") as f:
+        content = f.read() + f"\n% dispatch-fail-{uuid4()}\n".encode()
+
+    filename = f"test_dispatch_fail_{uuid4().hex[:8]}.pdf"
+
+    patch_target = "app.api.v1.endpoints.documents.ingest_document_task.delay"
+    with patch(patch_target, side_effect=RuntimeError("Redis connection refused")):
+        resp = await async_client.post(
+            "/api/v1/documents/ingest?async_mode=true",
+            files={"file": (filename, content, "application/pdf")},
+            data={"category": "test_dispatch_fail"},
+        )
+        assert resp.status_code == 500
+        assert "Failed to dispatch background ingestion" in resp.json()["detail"]
+
+    # Verify doc in DB is marked FAILED, so re-ingestion does NOT return 409 Conflict
+    fake_task_id = f"task-recovered-{uuid4()}"
+    mock_async_result = MagicMock()
+    mock_async_result.id = fake_task_id
+
+    with patch(patch_target, return_value=mock_async_result):
+        retry_resp = await async_client.post(
+            "/api/v1/documents/ingest?async_mode=true",
+            files={"file": (filename, content, "application/pdf")},
+            data={"category": "test_dispatch_fail"},
+        )
+        assert retry_resp.status_code == 202
+        recovered_doc_id = retry_resp.json()["id"]
+
+    await async_client.delete(f"/api/v1/documents/{recovered_doc_id}")

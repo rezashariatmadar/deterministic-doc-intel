@@ -47,6 +47,8 @@ services:
       - CELERY_RESULT_BACKEND=redis://redis:6379/2
       - EMBEDDING_PROVIDER=local
       - LLM_PROVIDER=local
+    volumes:
+      - uploads_data:/app/data/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -65,6 +67,8 @@ services:
     container_name: rag_worker
     restart: unless-stopped
     command: ["celery", "-A", "app.workers.celery_app", "worker", "-l", "info", "-c", "2"]
+    volumes:
+      - uploads_data:/app/data/uploads
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/rag_db
       - REDIS_URL=redis://redis:6379/0
@@ -81,3 +85,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  uploads_data:
