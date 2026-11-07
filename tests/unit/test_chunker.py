@@ -191,3 +191,56 @@ def test_no_ghost_chunk_after_large_paragraph_at_eof() -> None:
     assert len(chunks) == 2
     assert chunks[-1].raw_text != chunks[-2].raw_text
 
+
+def test_chunk_document_hierarchical_preserves_table_headers_and_parent_links() -> None:
+    # 1. Prose section (~400 tokens)
+    long_prose = (
+        "Operating expenses increased significantly due to research and development investments "
+        "in accelerated computing architecture and next-generation datacenter networking chips. "
+    ) * 15
+
+    # 2. Large table with 20 rows (~400 tokens)
+    header = "| Platform | Q1 Revenue | Q2 Revenue | Q3 Revenue | Q4 Revenue |"
+    sep = "|---|---|---|---|---|"
+    rows = [f"| Platform_{i:02d} | ${i * 10}M | ${i * 12}M | ${i * 15}M | ${i * 18}M |" for i in range(20)]
+    table_text = "\n".join([header, sep, *rows])
+
+    elements = [
+        StructuralElement(element_type="heading", text="Item 7. Financial Condition", page_number=1, heading_level=1),
+        StructuralElement(element_type="prose", text=long_prose, page_number=1),
+        StructuralElement(element_type="table", text=table_text, page_number=2),
+    ]
+    doc = ParsedDocument(title="NVIDIA 10-K", total_pages=2, elements=elements)
+
+    chunker = DocumentChunker()
+    result = chunker.chunk_document_hierarchical(
+        doc,
+        parent_tokens=1200,
+        child_tokens=200,
+        child_overlap=30,
+    )
+
+    # Validate parent chunks
+    assert len(result.parents) >= 2
+    for p_idx, parent in enumerate(result.parents):
+        assert parent.chunk_index == p_idx
+        assert parent.token_count <= 1200
+
+    # Validate child chunks
+    assert len(result.children) > len(result.parents)
+    child_indices = [c.chunk_index for _, c in result.children]
+    assert child_indices == list(range(len(result.children))), "Child chunk indices must be strictly sequential"
+
+    # Validate table child chunks preserve header and separator
+    table_children = [c for p_idx, c in result.children if c.element_type == "table"]
+    assert len(table_children) >= 2, "Table should be split into at least 2 child chunks"
+    for tc in table_children:
+        assert tc.raw_text.startswith(header)
+        assert sep in tc.raw_text
+        assert tc.token_count <= 250  # 200 child tokens + header room
+
+    # Validate all parent indices are valid
+    for p_idx, _ in result.children:
+        assert 0 <= p_idx < len(result.parents)
+
+

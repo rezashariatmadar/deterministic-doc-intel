@@ -24,6 +24,14 @@ class DocumentChunkDraft:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass
+class HierarchicalChunkResult:
+    """Encapsulates two-level hierarchical chunking results."""
+
+    parents: list[DocumentChunkDraft]
+    children: list[tuple[int, DocumentChunkDraft]]  # (parent_index, child_draft)
+
+
 class DocumentChunker:
     """Segments parsed structural documents into retrieval units preserving tables and hierarchy."""
 
@@ -219,6 +227,87 @@ class DocumentChunker:
                 chunks.append(chunk)
 
         return chunks
+
+    def chunk_document_hierarchical(
+        self,
+        doc: ParsedDocument,
+        parent_tokens: int = 1200,
+        child_tokens: int = 200,
+        child_overlap: int = 30,
+    ) -> HierarchicalChunkResult:
+        """
+        Produce a two-level hierarchical chunking result:
+        1. Parent chunks (~1200 tokens, 0 overlap) preserving broader semantic context.
+        2. Child chunks (~200 tokens, 30 overlap) mapped to parent index for fine-grained retrieval.
+        """
+        if not doc.elements:
+            return HierarchicalChunkResult(parents=[], children=[])
+
+        # Step 1: Chunk document at parent scale (no overlap between distinct parent sections)
+        parent_chunker = DocumentChunker(
+            target_tokens=parent_tokens,
+            overlap_tokens=0,
+            encoding_name=self.tokenizer.name,
+        )
+        parent_drafts = parent_chunker.chunk_document(doc)
+
+        # Step 2: Split each parent draft into fine-grained child drafts (~200 tokens)
+        child_chunker = DocumentChunker(
+            target_tokens=child_tokens,
+            overlap_tokens=child_overlap,
+            encoding_name=self.tokenizer.name,
+        )
+
+        children: list[tuple[int, DocumentChunkDraft]] = []
+        global_child_idx = 0
+
+        for p_idx, p_draft in enumerate(parent_drafts):
+            if p_draft.element_type == "table":
+                # Tables: chunk using table chunker preserving header and separator in all slices
+                table_child_chunks = child_chunker._chunk_table(
+                    table_text=p_draft.raw_text,
+                    doc_title=doc.title,
+                    section_path=p_draft.section_path,
+                    page_num=p_draft.page_start,
+                    start_chunk_idx=global_child_idx,
+                    metadata=p_draft.metadata,
+                )
+                for c_draft in table_child_chunks:
+                    children.append((p_idx, c_draft))
+                global_child_idx += len(table_child_chunks)
+            else:
+                # Prose / other: split large parent text if it exceeds child_tokens
+                p_text = p_draft.raw_text
+                p_tokens = self.count_tokens(p_draft.contextualized_text)
+                if p_tokens <= child_tokens:
+                    # Fits in single child chunk
+                    child_draft = DocumentChunkDraft(
+                        chunk_index=global_child_idx,
+                        raw_text=p_draft.raw_text,
+                        contextualized_text=p_draft.contextualized_text,
+                        token_count=p_draft.token_count,
+                        page_start=p_draft.page_start,
+                        page_end=p_draft.page_end,
+                        section_path=p_draft.section_path,
+                        element_type=p_draft.element_type,
+                        metadata=self._copy_metadata(p_draft.metadata),
+                    )
+                    children.append((p_idx, child_draft))
+                    global_child_idx += 1
+                else:
+                    prose_child_chunks = child_chunker._split_large_text(
+                        text=p_text,
+                        doc_title=doc.title,
+                        section_path=p_draft.section_path,
+                        page_num=p_draft.page_start,
+                        start_chunk_idx=global_child_idx,
+                        metadata=p_draft.metadata,
+                    )
+                    for c_draft in prose_child_chunks:
+                        children.append((p_idx, c_draft))
+                    global_child_idx += len(prose_child_chunks)
+
+        return HierarchicalChunkResult(parents=parent_drafts, children=children)
 
     def _merge_element_metadata(self, elements: list[StructuralElement]) -> dict[str, Any]:
         """Merge bounding boxes and block provenance from accumulated structural elements."""

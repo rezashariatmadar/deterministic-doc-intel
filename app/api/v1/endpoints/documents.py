@@ -23,7 +23,7 @@ from app.core.config import get_settings
 from app.core.exceptions import AppException, DocumentNotFoundError
 from app.db.repositories.chunk_repo import ChunkRepository
 from app.db.repositories.document_repo import DocumentRepository
-from app.schemas.document import ChunkCreate, DocumentCreate, DocumentRead
+from app.schemas.document import ChunkCreate, DocumentCreate, DocumentRead, ParentChunkCreate
 from app.services.ingestion.chunker import DocumentChunker
 from app.services.ingestion.parser import PDFLayoutParser
 from app.services.providers.base import EmbeddingProvider
@@ -112,17 +112,42 @@ async def ingest_document(
             )
         )
 
-        # 4. Generate structural chunks
+        # 4. Generate hierarchical chunks
         settings = get_settings()
         chunker = DocumentChunker(
-            target_tokens=settings.CHUNK_SIZE,
-            overlap_tokens=settings.CHUNK_OVERLAP,
+            target_tokens=settings.CHILD_CHUNK_SIZE,
+            overlap_tokens=settings.CHILD_CHUNK_OVERLAP,
         )
-        draft_chunks = chunker.chunk_document(parsed_doc)
+        hierarchical_result = chunker.chunk_document_hierarchical(
+            parsed_doc,
+            parent_tokens=settings.PARENT_CHUNK_SIZE,
+            child_tokens=settings.CHILD_CHUNK_SIZE,
+            child_overlap=settings.CHILD_CHUNK_OVERLAP,
+        )
 
-        if draft_chunks:
+        parent_id_map: dict[int, UUID] = {}
+        if hierarchical_result.parents:
+            parent_creates = [
+                ParentChunkCreate(
+                    document_id=doc.id,
+                    parent_index=p_idx,
+                    raw_text=p.raw_text,
+                    contextualized_text=p.contextualized_text,
+                    token_count=p.token_count,
+                    page_start=p.page_start,
+                    page_end=p.page_end,
+                    section_path=p.section_path,
+                    metadata=p.metadata,
+                )
+                for p_idx, p in enumerate(hierarchical_result.parents)
+            ]
+            saved_parents = await chunk_repo.bulk_create_parents(parent_creates)
+            parent_id_map = {p.parent_index: p.id for p in saved_parents}
+
+        child_drafts = [c for _, c in hierarchical_result.children]
+        if child_drafts:
             # 5. Compute vector embeddings in batches
-            texts_to_embed = [c.contextualized_text for c in draft_chunks]
+            texts_to_embed = [c.contextualized_text for c in child_drafts]
             batch_size = settings.EMBEDDING_BATCH_SIZE
             embeddings: list[list[float]] = []
 
@@ -131,10 +156,11 @@ async def ingest_document(
                 vectors = await embedding_provider.embed_texts(batch)
                 embeddings.extend(vectors)
 
-            # 6. Bulk insert chunks into PostgreSQL
+            # 6. Bulk insert chunks into PostgreSQL with parent_chunk_id
             chunk_creates = [
                 ChunkCreate(
                     document_id=doc.id,
+                    parent_chunk_id=parent_id_map.get(p_idx),
                     chunk_index=draft.chunk_index,
                     raw_text=draft.raw_text,
                     contextualized_text=draft.contextualized_text,
@@ -147,7 +173,7 @@ async def ingest_document(
                     embedding=embeddings[idx],
                     metadata=draft.metadata,
                 )
-                for idx, draft in enumerate(draft_chunks)
+                for idx, (p_idx, draft) in enumerate(hierarchical_result.children)
             ]
             await chunk_repo.bulk_create(chunk_creates)
 
@@ -155,7 +181,7 @@ async def ingest_document(
         updated_doc = await doc_repo.update_status(
             doc_id=doc.id,
             status="COMPLETED",
-            total_chunks=len(draft_chunks),
+            total_chunks=len(child_drafts),
         )
 
         assert updated_doc is not None

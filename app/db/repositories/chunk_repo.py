@@ -8,7 +8,8 @@ from sqlalchemy.orm import selectinload
 
 from app.db.models.chunk import DocumentChunk
 from app.db.models.document import Document
-from app.schemas.document import ChunkCreate
+from app.db.models.parent_chunk import ParentChunk
+from app.schemas.document import ChunkCreate, ParentChunkCreate
 
 
 class ChunkRepository:
@@ -40,6 +41,31 @@ class ChunkRepository:
         if records:
             self.session.add_all(records)
             await self.session.commit()
+        return records
+
+    async def bulk_create_parents(
+        self, parents_in: list[ParentChunkCreate]
+    ) -> list[ParentChunk]:
+        """Atomically insert a batch of parent chunks into PostgreSQL."""
+        records = [
+            ParentChunk(
+                document_id=p.document_id,
+                parent_index=p.parent_index,
+                raw_text=p.raw_text,
+                contextualized_text=p.contextualized_text,
+                token_count=p.token_count,
+                page_start=p.page_start,
+                page_end=p.page_end,
+                section_path=p.section_path,
+                chunk_metadata=p.metadata,
+            )
+            for p in parents_in
+        ]
+        if records:
+            self.session.add_all(records)
+            await self.session.commit()
+            for r in records:
+                await self.session.refresh(r)
         return records
 
     async def search_similar(
