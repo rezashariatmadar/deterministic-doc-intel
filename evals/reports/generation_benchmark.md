@@ -23,7 +23,7 @@
 - **Answer Relevance:** Degree to which the response directly answers the user prompt without drifting or extraneous content.
 - **Ground Truth Correctness:** Semantic and factual agreement between generated answer and curated reference ground truth.
 - **Citation Precision:** Ratio of successfully verified citations (`[N]`) to total attempted citations (`verified / (verified + unverified)`).
-- **Abstention Accuracy:** Accuracy of model abstention on unanswerable/adversarial queries (and answering on answerable queries).
+- **Abstention Accuracy:** Accuracy of model abstention on unanswerable / adversarial queries (and answering on answerable queries).
 
 ## Detailed Evaluation Results
 
