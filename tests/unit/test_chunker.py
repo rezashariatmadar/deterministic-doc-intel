@@ -254,3 +254,27 @@ def test_chunk_document_hierarchical_preserves_table_headers_and_parent_links() 
     # Validate all parent indices are valid
     for p_idx, _ in result.children:
         assert 0 <= p_idx < len(result.parents)
+
+
+def test_chunker_overlap_trimmed_when_combining_with_large_paragraph() -> None:
+    # Target tokens 150, overlap 40
+    chunker = DocumentChunker(target_tokens=150, overlap_tokens=40)
+
+    # Paragraph 1: 120 words (fills chunk 1)
+    p1 = "Alpha sentence with key financial info. " * 15
+    # Paragraph 2: 110 words (fits within max_content_tokens, but with 40 overlap exceeds 150)
+    p2 = "Beta sentence with balance sheet data. " * 14
+
+    elements = [
+        StructuralElement(element_type="heading", text="Section 1", page_number=1, heading_level=1),
+        StructuralElement(element_type="prose", text=p1, page_number=1),
+        StructuralElement(element_type="prose", text=p2, page_number=2),
+    ]
+    doc = ParsedDocument(title="Test Doc", total_pages=2, elements=elements)
+
+    chunks = chunker.chunk_document(doc)
+    assert len(chunks) >= 2
+    for idx, c in enumerate(chunks):
+        assert c.token_count <= 150, (
+            f"Chunk {idx} token count {c.token_count} exceeded target ceiling of 150 tokens"
+        )

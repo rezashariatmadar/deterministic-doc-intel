@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 
 
 class DocumentBase(BaseModel):
@@ -44,7 +44,11 @@ class ChunkBase(BaseModel):
     section_path: str = Field(..., min_length=1)
     element_type: str = Field(default="prose", max_length=30)
     embedding_model: str = Field(..., max_length=100)
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        validation_alias=AliasChoices("chunk_metadata", "metadata"),
+        serialization_alias="metadata",
+    )
 
 
 class ChunkCreate(ChunkBase):
@@ -68,7 +72,11 @@ class ParentChunkBase(BaseModel):
     page_start: int = Field(..., ge=1)
     page_end: int = Field(..., ge=1)
     section_path: str = Field(..., min_length=1)
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        validation_alias=AliasChoices("chunk_metadata", "metadata"),
+        serialization_alias="metadata",
+    )
 
 
 class ParentChunkCreate(ParentChunkBase):

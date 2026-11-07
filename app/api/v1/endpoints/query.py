@@ -8,10 +8,11 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import get_db, get_embedding, get_llm
+from app.api.dependencies import get_db, get_embedding, get_llm, get_reranker
 from app.schemas.query import QueryRequest, RAGResponse
 from app.services.providers.base import EmbeddingProvider, LLMProvider
 from app.services.retrieval.generator import GroundedGenerator
+from app.services.retrieval.reranker import CrossEncoderReranker
 from app.services.retrieval.vector_search import VectorSearchService
 
 router = APIRouter()
@@ -23,12 +24,14 @@ async def query_rag(
     db: AsyncSession = Depends(get_db),
     embedding_provider: EmbeddingProvider = Depends(get_embedding),
     llm_provider: LLMProvider = Depends(get_llm),
+    reranker: CrossEncoderReranker | None = Depends(get_reranker),
 ) -> RAGResponse:
     """Execute vector search and generate grounded answer with citations and confidence score."""
     search_service = VectorSearchService(
         session=db,
         embedding_provider=embedding_provider,
         llm_provider=llm_provider,
+        reranker=reranker,
     )
     chunks = await search_service.search(
         query=request.query,
@@ -52,12 +55,14 @@ async def stream_query_rag(
     db: AsyncSession = Depends(get_db),
     embedding_provider: EmbeddingProvider = Depends(get_embedding),
     llm_provider: LLMProvider = Depends(get_llm),
+    reranker: CrossEncoderReranker | None = Depends(get_reranker),
 ) -> StreamingResponse:
     """Stream grounded answer tokens via Server-Sent Events (SSE)."""
     search_service = VectorSearchService(
         session=db,
         embedding_provider=embedding_provider,
         llm_provider=llm_provider,
+        reranker=reranker,
     )
     chunks = await search_service.search(
         query=request.query,

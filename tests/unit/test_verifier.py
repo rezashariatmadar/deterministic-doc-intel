@@ -438,3 +438,36 @@ def test_verifier_verifies_table_row_claim() -> None:
     verifier = QuoteVerifier()
     res = verifier.verify_citation("Automotive revenue was $1,091 in Fiscal 2024", chunk, [chunk])
     assert res.is_verified
+
+
+def test_numeric_token_subset_and_unit_matching() -> None:
+    chunk = make_chunk(1, "Data Center revenue was $47.5 billion in fiscal 2024.")
+    verifier = QuoteVerifier()
+    # Claim uses $47.5B while text uses $47.5 billion
+    res = verifier.verify_citation("Data Center revenue was $47.5B in fiscal 2024", chunk, [chunk])
+    assert res.is_verified
+
+
+def test_table_row_cross_row_hallucination_rejected() -> None:
+    table_text = (
+        "| Segment | Fiscal 2024 |\n|---|---|\n| Data Center | $47,525 |\n| Gaming | $10,447 |"
+    )
+    chunk = make_chunk(1, text=table_text, element_type="table")
+    verifier = QuoteVerifier()
+
+    # Hallucination: Swapped Data Center revenue (47,525) to Gaming
+    bad_res = verifier.verify_citation("Gaming revenue was $47,525 in Fiscal 2024", chunk, [chunk])
+    assert not bad_res.is_verified, "Swapping row numbers must be rejected"
+
+    # Truthful claims
+    good_dc = verifier.verify_citation(
+        "Data Center revenue was $47,525 in Fiscal 2024", chunk, [chunk]
+    )
+    assert good_dc.is_verified
+    assert "Data Center" in str(good_dc.verified_quote)
+
+    good_gaming = verifier.verify_citation(
+        "Gaming revenue was $10,447 in Fiscal 2024", chunk, [chunk]
+    )
+    assert good_gaming.is_verified
+    assert "Gaming" in str(good_gaming.verified_quote)

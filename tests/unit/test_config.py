@@ -242,3 +242,27 @@ def test_phase2_settings_and_query_schemas():
         created_at=datetime.now(),
     )
     assert p_read.id == p_id
+
+    # Verify AliasChoices maps chunk_metadata attribute from ORM models
+    from unittest.mock import MagicMock
+
+    mock_orm = MagicMock()
+    mock_orm.id = p_id
+    mock_orm.document_id = p_create.document_id
+    mock_orm.chunk_index = 0
+    mock_orm.parent_chunk_id = p_id
+    mock_orm.raw_text = "Child text"
+    mock_orm.contextualized_text = "[Doc] Child text"
+    mock_orm.token_count = 50
+    mock_orm.page_start = 1
+    mock_orm.page_end = 1
+    mock_orm.section_path = "Overview"
+    mock_orm.element_type = "prose"
+    mock_orm.embedding_model = "test-model"
+    mock_orm.chunk_metadata = {"bbox": {"x0": 1.0, "y0": 2.0}, "block_index": 4}
+    mock_orm.created_at = datetime.now()
+
+    from app.schemas.document import ChunkRead
+
+    validated_chunk = ChunkRead.model_validate(mock_orm)
+    assert validated_chunk.metadata == {"bbox": {"x0": 1.0, "y0": 2.0}, "block_index": 4}

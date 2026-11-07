@@ -10,6 +10,9 @@ from app.schemas.query import RetrievedChunk
 
 logger = logging.getLogger(__name__)
 
+# Process-level model cache to avoid reloading PyTorch weights on every HTTP request
+_MODEL_CACHE: dict[tuple[str, str | None], Any] = {}
+
 
 def sigmoid(x: float) -> float:
     """Map unbounded logit to [0.0, 1.0] probability."""
@@ -43,10 +46,16 @@ class CrossEncoderReranker:
     def _ensure_loaded(self) -> Any:
         if self._model is not None:
             return self._model
+        cache_key = (self.model_name, self.device)
+        if cache_key in _MODEL_CACHE:
+            self._model = _MODEL_CACHE[cache_key]
+            return self._model
         try:
             from sentence_transformers import CrossEncoder
 
-            self._model = CrossEncoder(self.model_name, device=self.device)
+            loaded = CrossEncoder(self.model_name, device=self.device)
+            _MODEL_CACHE[cache_key] = loaded
+            self._model = loaded
             return self._model
         except Exception as exc:
             logger.warning("Failed to initialize CrossEncoder %s: %s", self.model_name, exc)

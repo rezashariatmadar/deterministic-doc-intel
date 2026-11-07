@@ -61,10 +61,14 @@ class VectorSearchService:
         # 1. Query optimization (Rewrite / Expansion / HyDE)
         semantic_query = query
         lexical_query = query
+        sub_queries: list[str] = []
         if enable_query_rewrite and self.transformer:
             transformed = await self.transformer.transform(query, enable_hyde=enable_hyde)
             semantic_query = transformed.semantic_query
             lexical_query = transformed.lexical_query
+            sub_queries = [
+                sq for sq in transformed.sub_queries if sq.strip() and sq.strip() != query.strip()
+            ]
             if enable_hyde and transformed.hypothetical_passage:
                 semantic_query = f"{semantic_query} {transformed.hypothetical_passage}"
 
@@ -97,6 +101,27 @@ class VectorSearchService:
                 page_min=page_min,
                 page_max=page_max,
             )
+            # Retrieve for distinct sub-queries if query expansion was enabled
+            if sub_queries:
+                sub_vectors = await self.embedding_provider.embed_texts(sub_queries[:2])
+                seen_dense = {c.id: (c, s) for c, s in dense_results}
+                for s_vec in sub_vectors:
+                    s_res = await self.chunk_repo.search_similar(
+                        query_vector=s_vec,
+                        top_k=candidate_k,
+                        threshold=min_similarity,
+                        document_id=doc_id,
+                        category=category,
+                        element_types=element_types,
+                        page_min=page_min,
+                        page_max=page_max,
+                    )
+                    for sc, ss in s_res:
+                        if sc.id not in seen_dense or ss > seen_dense[sc.id][1]:
+                            seen_dense[sc.id] = (sc, ss)
+                dense_results = sorted(seen_dense.values(), key=lambda x: x[1], reverse=True)[
+                    :candidate_k
+                ]
 
         if search_mode in ("hybrid", "sparse"):
             sparse_results = await self.chunk_repo.search_lexical(
@@ -108,6 +133,24 @@ class VectorSearchService:
                 page_min=page_min,
                 page_max=page_max,
             )
+            if sub_queries:
+                seen_sparse = {c.id: (c, s) for c, s in sparse_results}
+                for sq in sub_queries[:2]:
+                    sq_res = await self.chunk_repo.search_lexical(
+                        query=sq,
+                        top_k=candidate_k,
+                        document_id=doc_id,
+                        category=category,
+                        element_types=element_types,
+                        page_min=page_min,
+                        page_max=page_max,
+                    )
+                    for sc, ss in sq_res:
+                        if sc.id not in seen_sparse or ss > seen_sparse[sc.id][1]:
+                            seen_sparse[sc.id] = (sc, ss)
+                sparse_results = sorted(seen_sparse.values(), key=lambda x: x[1], reverse=True)[
+                    :candidate_k
+                ]
 
         # 4. Score fusion & RetrievedChunk construction
         w_dense = weight_dense if weight_dense is not None else self.settings.WEIGHT_DENSE
@@ -136,7 +179,10 @@ class VectorSearchService:
         candidates: list[RetrievedChunk] = []
         for c, score, d_rank, s_rank in fused:
             doc_title = c.document.title if c.document and c.document.title else "Unknown Document"
-            chunk_meta = c.metadata if isinstance(c.metadata, dict) else {}
+            raw_meta = getattr(c, "chunk_metadata", None)
+            if not isinstance(raw_meta, dict):
+                raw_meta = c.metadata if isinstance(c.metadata, dict) else {}
+            chunk_meta = raw_meta if isinstance(raw_meta, dict) else {}
             chunk_bbox = (
                 chunk_meta.get("bbox") if isinstance(chunk_meta.get("bbox"), dict) else None
             )
@@ -165,6 +211,7 @@ class VectorSearchService:
                     dense_rank=d_rank,
                     sparse_rank=s_rank,
                     rrf_score=round(score, 6) if search_mode == "hybrid" else None,
+                    token_count=getattr(c, "token_count", None),
                     bbox=chunk_bbox,
                     metadata=chunk_meta,
                 )
@@ -204,6 +251,7 @@ class VectorSearchService:
                 c.page_start = parent.page_start
                 c.page_end = parent.page_end
                 c.section_path = parent.section_path
+                c.token_count = parent.token_count
                 resolved_chunks.append(c)
             else:
                 resolved_chunks.append(c)
@@ -214,7 +262,9 @@ class VectorSearchService:
         accumulated_tokens = 0
 
         for chunk in resolved_chunks:
-            chunk_tokens = len(chunk.text.split())
+            chunk_tokens = (
+                chunk.token_count if chunk.token_count is not None else len(chunk.text.split())
+            )
             if accumulated_tokens + chunk_tokens > token_ceiling:
                 if results:
                     break

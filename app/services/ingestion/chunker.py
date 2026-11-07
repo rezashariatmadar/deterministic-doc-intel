@@ -210,6 +210,26 @@ class DocumentChunker:
                         ]
                         buffer_has_new_content = False
                 else:
+                    # Paragraph fits within max_content_tokens on its own.
+                    # Trim overlap tail if combined length exceeds max_content_tokens ceiling.
+                    if prose_buffer:
+                        buf_tokens = self.count_tokens(" ".join(prose_buffer))
+                        if buf_tokens + el_tokens > max_content_tokens:
+                            available_overlap = max(0, max_content_tokens - el_tokens)
+                            if available_overlap == 0:
+                                prose_buffer = []
+                                prose_pages = []
+                                prose_elements = []
+                            else:
+                                toks = self.tokenizer.encode(" ".join(prose_buffer))
+                                trimmed_tail = self.tokenizer.decode(
+                                    toks[-available_overlap:]
+                                ).strip()
+                                prose_buffer = [trimmed_tail] if trimmed_tail else []
+                                if not prose_buffer:
+                                    prose_pages = []
+                                    prose_elements = []
+
                     prose_buffer.append(el.text)
                     prose_pages.append(el.page_number)
                     prose_elements.append(el)

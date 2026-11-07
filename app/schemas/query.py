@@ -47,6 +47,7 @@ class RetrievedChunk(BaseModel):
     rrf_score: float | None = None
     rerank_score: float | None = None
     parent_chunk_id: UUID | None = None
+    token_count: int | None = None
     bbox: dict[str, Any] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 

@@ -78,6 +78,10 @@ async def test_vector_search_executes_and_filters(db_session: AsyncSession) -> N
                     element_type="prose",
                     embedding_model=settings.EMBEDDING_MODEL,
                     embedding=similar_vec,
+                    metadata={
+                        "bbox": {"x0": 10.0, "y0": 20.0, "x1": 30.0, "y1": 40.0},
+                        "block_index": 3,
+                    },
                 ),
                 ChunkCreate(
                     document_id=doc.id,
@@ -116,6 +120,12 @@ async def test_vector_search_executes_and_filters(db_session: AsyncSession) -> N
         assert top_chunk.similarity_score > 0.95
         assert "Data Center revenue rose 217%" in top_chunk.text
         assert top_chunk.element_type == "prose"
+        assert top_chunk.token_count == 18
+        assert top_chunk.bbox == {"x0": 10.0, "y0": 20.0, "x1": 30.0, "y1": 40.0}
+        assert top_chunk.metadata == {
+            "bbox": {"x0": 10.0, "y0": 20.0, "x1": 30.0, "y1": 40.0},
+            "block_index": 3,
+        }
 
         # 2. Search filtering for element_type "table" (similar chunk is "prose")
         table_results = await service.search(
@@ -210,7 +220,7 @@ async def test_search_lexical_and_parent_retrieval(db_session: AsyncSession) -> 
                     raw_text="Cloud compute infrastructure reached $47.5B in quarterly billing.",
                     contextualized_text=(
                         "[Doc: Lexical | Section: Item 7] "
-                        "Cloud compute infrastructure reached $47.5B."
+                        "Cloud compute infrastructure reached $47.5B in quarterly billing."
                     ),
                     token_count=15,
                     page_start=2,
@@ -248,6 +258,33 @@ async def test_search_lexical_and_parent_retrieval(db_session: AsyncSession) -> 
         fused = reciprocal_rank_fusion(dense_list, sparse_list)
         assert len(fused) == 2
         # created_chunks[1] is present in both lists
+        assert fused[0][0].id == created_chunks[1].id
+
+        # 5. Multi-query / sub-queries retrieval test
+        from unittest.mock import AsyncMock
+
+        mock_llm = AsyncMock()
+        mock_llm.generate.return_value = (
+            '{"semantic_query": "Overview", "lexical_query": "billing", '
+            '"sub_queries": ["directors", "quarterly billing"]}'
+        )
+        provider = MockEmbeddingProvider(query_vec=dummy_vec)
+        multi_service = VectorSearchService(
+            session=db_session,
+            embedding_provider=provider,
+            llm_provider=mock_llm,
+        )
+        sub_results = await multi_service.search(
+            query="Tell me about board and billing",
+            search_mode="sparse",
+            enable_query_rewrite=True,
+            top_k=5,
+        )
+        # Both chunks (one for directors, one for quarterly billing) should be retrieved
+        found_ids = {c.chunk_id for c in sub_results}
+        assert created_chunks[0].id in found_ids
+        assert created_chunks[1].id in found_ids
+
         fused_ids = [entry[0].id for entry in fused]
         assert created_chunks[1].id in fused_ids
         assert created_chunks[0].id in fused_ids

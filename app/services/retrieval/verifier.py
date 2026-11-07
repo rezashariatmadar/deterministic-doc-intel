@@ -30,21 +30,72 @@ _NUMERIC_TOKEN_PATTERN = re.compile(
 )
 
 
+def normalize_numeric_text(text: str) -> str:
+    """Normalize phrases like '$47.5 billion' -> '$47.5b', '$100 million' -> '$100m'."""
+    t = re.sub(r"(\d+(?:\.\d+)?)\s*(?:billion|billions)\b", r"\1b", text, flags=re.I)
+    t = re.sub(r"(\d+(?:\.\d+)?)\s*(?:million|millions)\b", r"\1m", t, flags=re.I)
+    t = re.sub(r"(\d+(?:\.\d+)?)\s*(?:thousand|thousands)\b", r"\1k", t, flags=re.I)
+    return t
+
+
 def extract_numeric_tokens(text: str) -> set[str]:
     """
     Extract normalized numeric tokens
     (commas removed, decimals and financial/percentage suffixes preserved).
     """
-    raw_nums = _NUMERIC_TOKEN_PATTERN.findall(text)
+    norm_text = normalize_numeric_text(text)
+    raw_nums = _NUMERIC_TOKEN_PATTERN.findall(norm_text)
     tokens: set[str] = set()
     for n in raw_nums:
         clean_n = n.replace(",", "").lower()
         if any(c.isdigit() for c in clean_n):
             tokens.add(clean_n)
-            base = re.sub(r"[kmb%]$", "", clean_n)
-            if base != clean_n and base:
-                tokens.add(base)
     return tokens
+
+
+def is_numeric_subset(
+    claim_nums: set[str],
+    reference_nums: set[str],
+    reference_text: str = "",
+) -> bool:
+    """
+    Check if all numeric assertions in claim_nums are supported by reference_nums.
+    Handles unit conversions ($47.5B <-> 47.5 when unit is grounded in reference),
+    table scale headers (in millions), and strictly rejects sign inversions (+ vs -),
+    hallucinated numbers, or conflicting units ($47.5B vs $47.5M).
+    """
+    if not claim_nums:
+        return True
+
+    ref_norm_text = reference_text.lower()
+    for cn in claim_nums:
+        if cn in reference_nums:
+            continue
+
+        # Check if claim has suffix [kmb] and ref has the base number
+        m_sfx = re.match(r"^([+-]?\d+(?:\.\d+)?)([kmb])$", cn)
+        if m_sfx:
+            base, sfx = m_sfx.group(1), m_sfx.group(2)
+            if base in reference_nums:
+                conflicting = {f"{base}k", f"{base}m", f"{base}b"} - {cn}
+                if not (conflicting & reference_nums):
+                    scale_map = {"b": "billion", "m": "million", "k": "thousand"}
+                    if (
+                        scale_map[sfx] in ref_norm_text
+                        or "in millions" in ref_norm_text
+                        or not any(s in ref_norm_text for s in scale_map.values())
+                    ):
+                        continue
+
+        # Check if claim has no suffix and ref has the base with suffix
+        m_bare = re.match(r"^([+-]?\d+(?:\.\d+)?)$", cn)
+        if m_bare:
+            base = m_bare.group(1)
+            if any(f"{base}{s}" in reference_nums for s in ("k", "m", "b")):
+                continue
+
+        return False
+    return True
 
 
 def normalize_with_mapping(text: str) -> tuple[str, list[int]]:
@@ -236,14 +287,10 @@ class QuoteVerifier:
 
         # Verify numbers present in quote: require that they appear in the candidate text
         quote_numbers = extract_numeric_tokens(clean_quote)
-        if quote_numbers:
-            # Fast rejection string check before full regex tokenization on chunk text
-            text_lower_nocomma = text.lower().replace(",", "")
-            if not all(num in text_lower_nocomma for num in quote_numbers):
-                return None
-            chunk_numbers = extract_numeric_tokens(text)
-            if not quote_numbers.issubset(chunk_numbers):
-                return None
+        if quote_numbers and not is_numeric_subset(
+            quote_numbers, extract_numeric_tokens(text), text
+        ):
+            return None
 
         quote_lower = clean_quote.lower()
         q_words = re.findall(r"\w+", quote_lower)
@@ -252,7 +299,9 @@ class QuoteVerifier:
         q_set = set(q_words)
         q_len = len(q_words)
 
-        if quote_numbers and not quote_numbers.issubset(extract_numeric_tokens(text)):
+        if quote_numbers and not is_numeric_subset(
+            quote_numbers, extract_numeric_tokens(text), text
+        ):
             return None
 
         # Fast pre-filter: if chunk has insufficient token overlap with quote, skip sentence search
@@ -281,7 +330,8 @@ class QuoteVerifier:
             start, _, s_text, s_lower, s_set, overlap = sent_spans[i]
             # Pre-filter using token overlap and numeric consistency (lazy number extraction)
             if overlap / max(q_len, 1) >= 0.35 and (
-                not quote_numbers or quote_numbers.issubset(extract_numeric_tokens(s_text))
+                not quote_numbers
+                or is_numeric_subset(quote_numbers, extract_numeric_tokens(s_text), s_text)
             ):
                 r = difflib.SequenceMatcher(None, quote_lower, s_lower).ratio()
                 if r > best_ratio:
@@ -294,7 +344,7 @@ class QuoteVerifier:
                 if pair_overlap / max(q_len, 1) >= 0.35:
                     pair_text = text[start:next_end].strip()
                     pair_nums = extract_numeric_tokens(pair_text)
-                    if not quote_numbers or quote_numbers.issubset(pair_nums):
+                    if not quote_numbers or is_numeric_subset(quote_numbers, pair_nums, pair_text):
                         r = difflib.SequenceMatcher(None, quote_lower, pair_text.lower()).ratio()
                         if r > best_ratio:
                             best_ratio = r
@@ -304,7 +354,10 @@ class QuoteVerifier:
         if (
             best_ratio >= threshold
             and best_slice
-            and (not quote_numbers or quote_numbers.issubset(extract_numeric_tokens(best_slice)))
+            and (
+                not quote_numbers
+                or is_numeric_subset(quote_numbers, extract_numeric_tokens(best_slice), best_slice)
+            )
         ):
             return self._clean_boundary(best_slice, clean_quote)
 
@@ -313,7 +366,10 @@ class QuoteVerifier:
             span
             for span in sent_spans
             if span[5] / max(q_len, 1) >= 0.4
-            and (not quote_numbers or quote_numbers.issubset(extract_numeric_tokens(span[2])))
+            and (
+                not quote_numbers
+                or is_numeric_subset(quote_numbers, extract_numeric_tokens(span[2]), span[2])
+            )
         ]
         if candidate_spans:
             candidate_spans.sort(key=lambda s: s[5], reverse=True)
@@ -332,7 +388,7 @@ class QuoteVerifier:
                     c_end = w_matches[i + w - 1].end()
                     cand = s_text[c_start:c_end].strip()
                     cand_nums = extract_numeric_tokens(cand)
-                    if quote_numbers and not quote_numbers.issubset(cand_nums):
+                    if quote_numbers and not is_numeric_subset(quote_numbers, cand_nums, cand):
                         continue
                     r = difflib.SequenceMatcher(None, quote_lower, cand.lower()).ratio()
                     if r > best_ratio:
@@ -343,7 +399,10 @@ class QuoteVerifier:
         if (
             best_ratio >= effective_threshold
             and best_slice
-            and (not quote_numbers or quote_numbers.issubset(extract_numeric_tokens(best_slice)))
+            and (
+                not quote_numbers
+                or is_numeric_subset(quote_numbers, extract_numeric_tokens(best_slice), best_slice)
+            )
         ):
             return self._clean_boundary(best_slice, clean_quote)
 
@@ -353,7 +412,7 @@ class QuoteVerifier:
         """Verify natural language claim against structured markdown table cells."""
         claim_nums = extract_numeric_tokens(claim)
         table_nums = extract_numeric_tokens(table_text)
-        if claim_nums and not claim_nums.issubset(table_nums):
+        if claim_nums and not is_numeric_subset(claim_nums, table_nums, table_text):
             return None
 
         lines = [
@@ -364,19 +423,70 @@ class QuoteVerifier:
             and not line.startswith("| -")
             and not set(line.replace("|", "").strip()) <= {"-", " "}
         ]
-        if not lines:
+        if len(lines) < 2:
             return None
 
-        header_tokens = set(re.findall(r"\w+", lines[0].lower()))
-        claim_tokens = set(re.findall(r"\w+", claim.lower()))
+        header_line = lines[0]
+        header_nums = extract_numeric_tokens(header_line)
+        # Numbers that belong to data cells, not table headers (e.g. 47,525 vs 2024)
+        claim_data_nums = claim_nums - header_nums
+
+        # Extract meaningful entity words from the claim (excluding common table/financial words)
+        claim_words = set(re.findall(r"\b[a-z]{3,}\b", claim.lower()))
+        stopwords = {
+            "the",
+            "and",
+            "for",
+            "with",
+            "from",
+            "was",
+            "were",
+            "are",
+            "has",
+            "have",
+            "been",
+            "had",
+            "fiscal",
+            "year",
+            "revenue",
+            "quarter",
+            "month",
+            "total",
+            "percent",
+            "growth",
+            "margin",
+            "reported",
+            "recorded",
+            "reached",
+            "generated",
+        }
+        claim_entities = claim_words - stopwords
 
         for row in lines[1:]:
-            row_tokens = set(re.findall(r"\w+", row.lower()))
+            cells = [c.strip() for c in row.split("|") if c.strip()]
+            if not cells:
+                continue
+
+            # First cell is typically the row label/entity (e.g. 'Data Center', 'Gaming')
+            row_label = cells[0].lower()
+            row_label_words = set(re.findall(r"\b[a-z]{3,}\b", row_label)) - stopwords
             row_nums = extract_numeric_tokens(row)
-            if (claim_nums and claim_nums.intersection(row_nums)) or (claim_tokens & row_tokens):
-                overlap = claim_tokens & (row_tokens | header_tokens)
-                if len(overlap) >= min(2, len(claim_tokens)):
-                    return row
+
+            # If claim specifies entities, row must match at least one significant entity word
+            if claim_entities and row_label_words:
+                entity_match = bool(claim_entities & row_label_words)
+            else:
+                entity_match = True
+
+            # If claim asserts specific data numbers, this row must contain those numbers
+            if claim_data_nums:
+                num_match = is_numeric_subset(claim_data_nums, row_nums, row)
+            else:
+                num_match = True
+
+            if entity_match and num_match:
+                return row
+
         return None
 
     def verify_citation(

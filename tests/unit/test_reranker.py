@@ -116,3 +116,25 @@ async def test_reranker_circuit_breaker_on_exception() -> None:
     assert len(fallback) == 1
     assert fallback[0].text == "Chunk text"
     assert fallback[0].source_id == 1
+
+
+def test_reranker_model_is_cached_across_instances() -> None:
+    import sys
+    from unittest.mock import MagicMock, patch
+
+    mock_st = MagicMock()
+    mock_instance = MagicMock()
+    mock_st.CrossEncoder.return_value = mock_instance
+
+    with patch.dict(sys.modules, {"sentence_transformers": mock_st}):
+        r1 = CrossEncoderReranker(model_name="mock-model-cache-test")
+        r2 = CrossEncoderReranker(model_name="mock-model-cache-test")
+
+        m1 = r1._ensure_loaded()
+        m2 = r2._ensure_loaded()
+
+        assert m1 is mock_instance
+        assert m2 is mock_instance
+        assert mock_st.CrossEncoder.call_count == 1, (
+            "CrossEncoder must be loaded only once across instances"
+        )
