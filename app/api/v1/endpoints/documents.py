@@ -18,12 +18,13 @@ from fastapi import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import get_db, get_embedding
+from app.api.dependencies import get_db, get_embedding, get_semantic_cache
 from app.core.config import get_settings
 from app.core.exceptions import AppException, DocumentNotFoundError
 from app.db.repositories.chunk_repo import ChunkRepository
 from app.db.repositories.document_repo import DocumentRepository
 from app.schemas.document import ChunkCreate, DocumentCreate, DocumentRead, ParentChunkCreate
+from app.services.cache.semantic_cache import SemanticCacheService
 from app.services.ingestion.chunker import DocumentChunker
 from app.services.ingestion.parser import PDFLayoutParser
 from app.services.providers.base import EmbeddingProvider
@@ -42,6 +43,7 @@ async def ingest_document(
     category: str | None = Form(default=None),
     db: AsyncSession = Depends(get_db),
     embedding_provider: EmbeddingProvider = Depends(get_embedding),
+    semantic_cache: SemanticCacheService | None = Depends(get_semantic_cache),
 ) -> DocumentRead:
     """
     Ingest a PDF document idempotently.
@@ -72,6 +74,8 @@ async def ingest_document(
             )
         # Previous attempt failed or was incomplete; purge it to reprocess cleanly
         await doc_repo.delete(existing_doc.id)
+        if semantic_cache is not None:
+            await semantic_cache.invalidate_document(existing_doc.id)
 
     # 2. Save temporary file to run layout-aware parser
     filename = file.filename or "uploaded_document.pdf"
@@ -259,9 +263,12 @@ async def get_document(
 async def delete_document(
     document_id: UUID,
     db: AsyncSession = Depends(get_db),
+    semantic_cache: SemanticCacheService | None = Depends(get_semantic_cache),
 ) -> None:
     """Delete a document and its cascading chunks from PostgreSQL."""
     doc_repo = DocumentRepository(db)
     deleted = await doc_repo.delete(document_id)
     if not deleted:
         raise DocumentNotFoundError(f"Document with ID {document_id} not found.")
+    if semantic_cache is not None:
+        await semantic_cache.invalidate_document(document_id)

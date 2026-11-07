@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     # Database & Cache
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/rag_db"
     REDIS_URL: str = "redis://localhost:6379/0"
+    SEMANTIC_CACHE_ENABLED: bool = True
+    SEMANTIC_CACHE_THRESHOLD: float = 0.94
+    SEMANTIC_CACHE_TTL: int = 86400
 
     # Embedding Provider Configuration
     EMBEDDING_PROVIDER: Literal["local", "openai", "gemini"] = "local"
