@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -118,3 +118,62 @@ class ChunkRepository:
         result = await self.session.execute(stmt)
         rows = result.all()
         return [(row[0], float(row[1])) for row in rows]
+
+    async def search_lexical(
+        self,
+        query: str,
+        top_k: int = 30,
+        document_id: UUID | None = None,
+        category: str | None = None,
+        element_types: list[str] | None = None,
+        page_min: int | None = None,
+        page_max: int | None = None,
+    ) -> list[tuple[DocumentChunk, float]]:
+        """
+        Execute full-text lexical search using PostgreSQL TSVECTOR, GIN index, and ts_rank_cd.
+        Uses func.websearch_to_tsquery('english', query) for robust syntax handling.
+        """
+        if not query or not query.strip():
+            return []
+
+        ts_query = func.websearch_to_tsquery("english", query)
+        lexical_score = func.ts_rank_cd(DocumentChunk.search_vector, ts_query, 32).label("lexical_score")
+
+        stmt = (
+            select(DocumentChunk, lexical_score)
+            .join(Document, DocumentChunk.document_id == Document.id)
+            .options(selectinload(DocumentChunk.document))
+            .where(Document.status == "COMPLETED")
+            .where(DocumentChunk.search_vector.op("@@")(ts_query))
+        )
+
+        if category:
+            stmt = stmt.where(Document.category == category)
+
+        if document_id:
+            stmt = stmt.where(DocumentChunk.document_id == document_id)
+
+        if element_types:
+            stmt = stmt.where(DocumentChunk.element_type.in_(element_types))
+
+        if page_min is not None:
+            stmt = stmt.where(DocumentChunk.page_start >= page_min)
+
+        if page_max is not None:
+            stmt = stmt.where(DocumentChunk.page_end <= page_max)
+
+        stmt = stmt.order_by(lexical_score.desc()).limit(top_k)
+
+        result = await self.session.execute(stmt)
+        rows = result.all()
+        return [(row[0], float(row[1])) for row in rows]
+
+    async def get_parents_by_ids(
+        self, parent_ids: list[UUID]
+    ) -> dict[UUID, ParentChunk]:
+        """Fetch parent chunks in batch by their UUIDs."""
+        if not parent_ids:
+            return {}
+        stmt = select(ParentChunk).where(ParentChunk.id.in_(parent_ids))
+        result = await self.session.execute(stmt)
+        return {p.id: p for p in result.scalars().all()}
