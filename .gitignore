@@ -66,3 +66,4 @@ data/raw_corpus/*.pdf
 !data/raw_corpus/nvidia_10k_sample.pdf
 logs/
 *.log
+*.zip
