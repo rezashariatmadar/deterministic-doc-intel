@@ -31,11 +31,24 @@ class SemanticCacheService:
         self.threshold = threshold
         self.ttl = ttl
 
+    @staticmethod
+    def _l2_normalize(vec: list[float]) -> list[float]:
+        """Compute L2 unit norm of a vector for in-process cosine similarity."""
+        norm = math.sqrt(math.fsum(x * x for x in vec))
+        if norm <= 1e-12:
+            return vec
+        return [x / norm for x in vec]
+
     def canonical_scope_hash(
-        self, search_mode: str, filters: dict[str, Any] | QueryFilters | None = None
+        self,
+        search_mode: str,
+        filters: dict[str, Any] | QueryFilters | None = None,
+        top_k: int = 5,
+        enable_reranker: bool | None = None,
     ) -> str:
         """
-        Produce a deterministic SHA-256 hex digest of sorted canonical filters and search mode.
+        Produce a deterministic SHA-256 hex digest of sorted canonical filters, search mode,
+        top_k, and enable_reranker parameters.
         """
         if filters is None:
             raw_filters: dict[str, Any] = {}
@@ -49,6 +62,8 @@ class SemanticCacheService:
         payload = {
             "search_mode": search_mode,
             "filters": raw_filters,
+            "top_k": top_k,
+            "enable_reranker": enable_reranker,
         }
         serialized = json.dumps(payload, sort_keys=True, default=str)
         return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
@@ -69,6 +84,7 @@ class SemanticCacheService:
             if not entries:
                 return None, 0.0
 
+            normalized_query = self._l2_normalize(query_vector)
             best_score = -float("inf")
             best_response_data: dict[str, Any] | None = None
 
@@ -83,7 +99,10 @@ class SemanticCacheService:
                     continue
 
                 # In-process dot-product of L2-normalized vectors
-                score = math.fsum(a * b for a, b in zip(query_vector, cached_vec, strict=False))
+                normalized_cached = self._l2_normalize(cached_vec)
+                score = math.fsum(
+                    a * b for a, b in zip(normalized_query, normalized_cached, strict=False)
+                )
                 if score > best_score:
                     best_score = score
                     best_response_data = entry.get("response")
@@ -129,8 +148,9 @@ class SemanticCacheService:
                 doc_ids.add(str(source.document_id))
 
         entry_id = str(uuid.uuid4())
+        normalized_vector = self._l2_normalize(query_vector)
         payload = {
-            "vector": query_vector,
+            "vector": normalized_vector,
             "response": response.model_dump(mode="json"),
             "timestamp": time.time(),
             "document_ids": sorted(doc_ids),
@@ -139,6 +159,30 @@ class SemanticCacheService:
 
         try:
             scope_key = f"semcache:scope:{scope_hash}"
+
+            # Bound Redis Hash size to 200 items by evicting oldest entries
+            try:
+                current_len = await self.redis.hlen(scope_key)
+                if current_len >= 200:
+                    entries = await self.redis.hgetall(scope_key)
+                    parsed_entries: list[tuple[str, float]] = []
+                    for k, v in entries.items():
+                        k_str = k.decode("utf-8") if isinstance(k, bytes) else str(k)
+                        v_str = v.decode("utf-8") if isinstance(v, bytes) else str(v)
+                        try:
+                            entry_data = json.loads(v_str)
+                            ts = float(entry_data.get("timestamp", 0.0))
+                        except Exception:
+                            ts = 0.0
+                        parsed_entries.append((k_str, ts))
+                    parsed_entries.sort(key=lambda x: x[1])
+                    excess = (current_len - 200) + 1
+                    to_delete = [item[0] for item in parsed_entries[:excess]]
+                    if to_delete:
+                        await self.redis.hdel(scope_key, *to_delete)
+            except Exception as evict_err:
+                logger.debug("Failed eviction check during semantic cache store: %s", evict_err)
+
             await self.redis.hset(scope_key, entry_id, serialized)
             await self.redis.expire(scope_key, self.ttl)
 

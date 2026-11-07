@@ -89,6 +89,9 @@ async def process_document_ingestion(
             child_overlap=settings.CHILD_CHUNK_OVERLAP,
         )
 
+        # Ensure idempotency for retried tasks: clear any previous chunks or parents
+        await chunk_repo.delete_by_document(doc.id)
+
         parent_id_map: dict[int, UUID] = {}
         if hierarchical_result.parents:
             parent_creates = [

@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    image: paradedb/paradedb:latest
     container_name: rag_postgres
     restart: unless-stopped
     ports:
@@ -19,7 +19,7 @@ services:
       retries: 5
 
   redis:
-    image: redis/redis-stack-server:latest
+    image: redis:7-alpine
     container_name: rag_redis
     restart: unless-stopped
     ports:

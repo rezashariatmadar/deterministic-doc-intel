@@ -39,6 +39,21 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
         "completion": 0.025,
         "embedding": 0.025,
     },
+    "local": {
+        "prompt": 0.0,
+        "completion": 0.0,
+        "embedding": 0.0,
+    },
+    "mistral": {
+        "prompt": 0.0,
+        "completion": 0.0,
+        "embedding": 0.0,
+    },
+    "baai/bge-m3": {
+        "prompt": 0.0,
+        "completion": 0.0,
+        "embedding": 0.0,
+    },
     "default": {
         "prompt": 0.15,
         "completion": 0.60,
@@ -77,7 +92,11 @@ class CostEstimator:
         embedding_tokens: int = 0,
     ) -> float:
         """Calculate estimated total cost in USD for the query based on model pricing."""
-        pricing = MODEL_PRICING.get(model.lower(), MODEL_PRICING["default"])
+        model_key = model.lower()
+        if model_key.startswith("local") or "bge-m3" in model_key or "mistral" in model_key:
+            return 0.0
+
+        pricing = MODEL_PRICING.get(model_key, MODEL_PRICING["default"])
         prompt_rate = pricing.get("prompt", MODEL_PRICING["default"]["prompt"])
         completion_rate = pricing.get("completion", MODEL_PRICING["default"]["completion"])
         embedding_rate = pricing.get("embedding", MODEL_PRICING["default"]["embedding"])

@@ -66,6 +66,18 @@ class ChunkRepository:
                 await self.session.refresh(r)
         return records
 
+    async def delete_by_document(self, document_id: UUID) -> None:
+        """Atomically delete all child chunks and parent chunks associated with a document."""
+        from sqlalchemy import delete
+
+        await self.session.execute(
+            delete(DocumentChunk).where(DocumentChunk.document_id == document_id)
+        )
+        await self.session.execute(
+            delete(ParentChunk).where(ParentChunk.document_id == document_id)
+        )
+        await self.session.commit()
+
     async def search_similar(
         self,
         query_vector: list[float],

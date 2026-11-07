@@ -90,3 +90,15 @@ def test_estimate_cost_unknown_model_fallback():
     )
     assert isinstance(cost, float)
     assert cost > 0.0
+
+
+def test_estimate_cost_local_models_zero():
+    # Local models (local, mistral, baai/bge-m3) run on-premise and incur $0 cloud API cost
+    for local_model in ("local", "mistral", "baai/bge-m3", "local-embed", "BAAI/bge-m3"):
+        cost = CostEstimator.estimate_cost(
+            model=local_model,
+            prompt_tokens=1_000_000,
+            completion_tokens=1_000_000,
+            embedding_tokens=1_000_000,
+        )
+        assert cost == 0.0, f"Expected cost for local model '{local_model}' to be 0.0, got {cost}"

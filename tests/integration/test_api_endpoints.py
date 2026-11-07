@@ -5,6 +5,7 @@ import math
 import os
 from collections.abc import AsyncGenerator
 from typing import Any
+from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -144,20 +145,39 @@ async def test_document_ingestion_list_query_delete_flow(
         items = list_resp.json()
         assert any(item["id"] == doc_id for item in items)
 
-        # 4. Standard query via POST /api/v1/query
+        # 4. Standard query via POST /api/v1/query with explicit correlation ID header
+        custom_corr_id = f"corr-req-{uuid4().hex[:12]}"
         query_resp = await api_client.post(
             "/api/v1/query",
             json={
                 "query": "What was the Data Center revenue in fiscal 2024?",
                 "top_k": 3,
             },
+            headers={"X-Request-ID": custom_corr_id},
         )
         assert query_resp.status_code == 200
+        assert query_resp.headers.get("X-Request-ID") == custom_corr_id
         query_data = query_resp.json()
         assert "Data Center revenue was $47.5B" in query_data["answer"]
         assert len(query_data["citations"]) >= 1
         assert query_data["confidence_score"] > 0.0
         assert len(query_data["sources"]) > 0
+
+        # Verify QueryLog in database retained the correlation ID
+        from sqlalchemy import select
+
+        from app.db.models.query_log import QueryLog
+        from app.db.session import async_session_maker
+
+        async with async_session_maker() as verify_session:
+            log_res = await verify_session.execute(
+                select(QueryLog).where(QueryLog.request_id == custom_corr_id)
+            )
+            saved_log = log_res.scalar_one_or_none()
+            assert saved_log is not None, (
+                f"QueryLog with request_id={custom_corr_id} not found in DB"
+            )
+            assert saved_log.request_id == custom_corr_id
 
         # 5. Streaming query via POST /api/v1/query/stream
         stream_resp = await api_client.post(
@@ -191,6 +211,18 @@ async def test_document_ingestion_list_query_delete_flow(
         assert v_data["confidence_score"] > 0.0
         assert len(v_data["citations"]) >= 1
         assert "latency_ms" in v_data
+
+        # 5b. Repeated streaming query should hit semantic cache and return X-Cache-Hit header
+        cached_stream_resp = await api_client.post(
+            "/api/v1/query/stream",
+            json={
+                "query": "What was the Data Center revenue in fiscal 2024?",
+                "top_k": 3,
+            },
+        )
+        assert cached_stream_resp.status_code == 200
+        assert cached_stream_resp.headers.get("X-Cache-Hit") == "true"
+        assert "data: " in cached_stream_resp.text
 
     finally:
         # 6. Delete document via DELETE /api/v1/documents/{id}

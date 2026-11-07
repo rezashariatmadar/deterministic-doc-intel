@@ -17,6 +17,7 @@ from app.api.dependencies import (
     get_reranker,
     get_semantic_cache,
 )
+from app.core.logging import get_correlation_id
 from app.db.repositories.telemetry import TelemetryRepository
 from app.db.session import async_session_maker
 from app.schemas.metrics import QueryLogCreate
@@ -54,6 +55,8 @@ async def query_rag(
             scope_hash = semantic_cache.canonical_scope_hash(
                 search_mode=request.search_mode,
                 filters=request.filters,
+                top_k=request.top_k,
+                enable_reranker=request.enable_reranker,
             )
             query_vector = await embedding_provider.embed_query(request.query)
             cached_response, _similarity = await semantic_cache.lookup(
@@ -75,7 +78,7 @@ async def query_rag(
                 )
 
                 log_entry = QueryLogCreate(
-                    request_id=str(uuid.uuid4()),
+                    request_id=get_correlation_id() or str(uuid.uuid4()),
                     query_text=request.query,
                     search_mode=request.search_mode,
                     cache_hit=True,
@@ -133,6 +136,8 @@ async def query_rag(
                 scope_hash = semantic_cache.canonical_scope_hash(
                     search_mode=request.search_mode,
                     filters=request.filters,
+                    top_k=request.top_k,
+                    enable_reranker=request.enable_reranker,
                 )
             if query_vector is None:
                 query_vector = await embedding_provider.embed_query(request.query)
@@ -172,7 +177,7 @@ async def query_rag(
     )
 
     log_entry = QueryLogCreate(
-        request_id=str(uuid.uuid4()),
+        request_id=get_correlation_id() or str(uuid.uuid4()),
         query_text=request.query,
         search_mode=request.search_mode,
         cache_hit=False,
@@ -207,9 +212,121 @@ async def stream_query_rag(
     embedding_provider: EmbeddingProvider = Depends(get_embedding),
     llm_provider: LLMProvider = Depends(get_llm),
     reranker: CrossEncoderReranker | None = Depends(get_reranker),
+    semantic_cache: SemanticCacheService | None = Depends(get_semantic_cache),
 ) -> StreamingResponse:
     """Stream grounded answer tokens via Server-Sent Events (SSE)."""
     request_t0 = time.perf_counter()
+
+    scope_hash: str | None = None
+    query_vector: list[float] | None = None
+
+    if semantic_cache is not None:
+        try:
+            scope_hash = semantic_cache.canonical_scope_hash(
+                search_mode=request.search_mode,
+                filters=request.filters,
+                top_k=request.top_k,
+                enable_reranker=request.enable_reranker,
+            )
+            query_vector = await embedding_provider.embed_query(request.query)
+            cached_response, _similarity = await semantic_cache.lookup(
+                query_vector=query_vector,
+                scope_hash=scope_hash,
+            )
+            if cached_response is not None:
+                await db.close()
+
+                async def sse_cached_publisher() -> AsyncGenerator[str, None]:
+                    sources_payload = [
+                        {
+                            "source_id": s.source_id,
+                            "document_title": s.document_title,
+                            "page": s.page_start,
+                            "section": s.section_path,
+                            "similarity_score": s.similarity_score,
+                        }
+                        for s in cached_response.sources
+                    ]
+                    yield f"data: {json.dumps({'event': 'sources', 'data': sources_payload})}\n\n"
+                    token_msg = json.dumps({"event": "token", "content": cached_response.answer})
+                    yield f"data: {token_msg}\n\n"
+                    citations_payload = [
+                        {
+                            "source_id": c.source_id,
+                            "document_id": str(c.document_id) if c.document_id else None,
+                            "document_title": c.document_title,
+                            "page_start": c.page_start,
+                            "page_end": c.page_end,
+                            "section_path": c.section_path,
+                            "supporting_quote": c.supporting_quote,
+                            "bbox": c.bbox,
+                            "metadata": c.metadata,
+                        }
+                        for c in cached_response.citations
+                    ]
+                    verification_payload = {
+                        "is_answerable": cached_response.is_answerable,
+                        "verified_answer": cached_response.answer,
+                        "citations": citations_payload,
+                        "confidence_score": cached_response.confidence_score,
+                        "has_unverified": "[unverified:" in cached_response.answer,
+                        "latency_ms": cached_response.latency_ms,
+                    }
+                    verif_msg = json.dumps({"event": "verification", "data": verification_payload})
+                    yield f"data: {verif_msg}\n\n"
+                    yield "data: [DONE]\n\n"
+
+                    # Persist streaming query cache-hit telemetry asynchronously
+                    try:
+                        async with async_session_maker() as stream_db:
+                            model_name = getattr(llm_provider, "model_name", "gpt-4o-mini")
+                            embedding_tokens = CostEstimator.estimate_tokens(request.query)
+                            cost_usd = CostEstimator.estimate_cost(
+                                model=model_name,
+                                prompt_tokens=0,
+                                completion_tokens=0,
+                                embedding_tokens=embedding_tokens,
+                            )
+                            total_latency_ms = round((time.perf_counter() - request_t0) * 1000.0, 2)
+                            log_entry = QueryLogCreate(
+                                request_id=get_correlation_id() or str(uuid.uuid4()),
+                                query_text=request.query,
+                                search_mode=request.search_mode,
+                                cache_hit=True,
+                                is_answerable=cached_response.is_answerable,
+                                confidence_score=cached_response.confidence_score,
+                                top_reranker_score=None,
+                                rewrite_ms=0.0,
+                                dense_search_ms=0.0,
+                                sparse_search_ms=0.0,
+                                rerank_ms=0.0,
+                                llm_ttft_ms=total_latency_ms,
+                                total_latency_ms=total_latency_ms,
+                                prompt_tokens=0,
+                                completion_tokens=0,
+                                embedding_tokens=embedding_tokens,
+                                estimated_cost_usd=cost_usd,
+                            )
+                            telemetry_repo = TelemetryRepository(stream_db)
+                            await telemetry_repo.log_query(log_entry)
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to persist streaming query cache hit telemetry: %s", exc
+                        )
+
+                return StreamingResponse(
+                    sse_cached_publisher(),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no",
+                        "X-Cache-Hit": "true",
+                    },
+                )
+        except Exception as exc:
+            logger.warning("Redis error during streaming semantic cache lookup: %s", exc)
+
     search_service = VectorSearchService(
         session=db,
         embedding_provider=embedding_provider,
@@ -241,6 +358,7 @@ async def stream_query_rag(
     stream_gen = generator.generate_stream(query=request.query, chunks=chunks)
 
     async def sse_event_publisher() -> AsyncGenerator[str, None]:
+        nonlocal query_vector, scope_hash
         start_time = time.perf_counter()
         # Initial event emitting retrieved sources metadata
         sources_payload = [
@@ -293,6 +411,26 @@ async def stream_query_rag(
         yield f"data: {json.dumps({'event': 'verification', 'data': verification_payload})}\n\n"
         yield "data: [DONE]\n\n"
 
+        # Persist response to semantic cache asynchronously
+        if semantic_cache is not None:
+            try:
+                if query_vector is None:
+                    query_vector = await embedding_provider.embed_query(request.query)
+                if scope_hash is None:
+                    scope_hash = semantic_cache.canonical_scope_hash(
+                        search_mode=request.search_mode,
+                        filters=request.filters,
+                        top_k=request.top_k,
+                        enable_reranker=request.enable_reranker,
+                    )
+                await semantic_cache.store(
+                    query_vector=query_vector,
+                    scope_hash=scope_hash,
+                    response=rag_response,
+                )
+            except Exception as exc:
+                logger.warning("Failed to store streaming query in semantic cache: %s", exc)
+
         # Persist streaming query telemetry asynchronously
         try:
             async with async_session_maker() as stream_db:
@@ -318,7 +456,7 @@ async def stream_query_rag(
 
                 total_latency_ms = round((time.perf_counter() - request_t0) * 1000.0, 2)
                 log_entry = QueryLogCreate(
-                    request_id=str(uuid.uuid4()),
+                    request_id=get_correlation_id() or str(uuid.uuid4()),
                     query_text=request.query,
                     search_mode=request.search_mode,
                     cache_hit=False,

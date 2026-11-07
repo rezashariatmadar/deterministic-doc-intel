@@ -6,11 +6,13 @@ Covers Celery worker execution, event loop isolation, and live task tracking.
 import math
 import os
 from collections.abc import AsyncGenerator
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_embedding
 from app.core.config import get_settings
@@ -239,3 +241,92 @@ async def test_async_ingestion_dispatch_failure_resilience(async_client: AsyncCl
         recovered_doc_id = retry_resp.json()["id"]
 
     await async_client.delete(f"/api/v1/documents/{recovered_doc_id}")
+
+
+@pytest.mark.asyncio
+async def test_pipeline_idempotent_retry_clears_partial_chunks(
+    db_session: AsyncSession,
+) -> None:
+    """Verify retrying ingestion for a document clears previous chunks and avoids duplicates."""
+    from sqlalchemy import func, select
+
+    from app.db.models.chunk import DocumentChunk
+    from app.db.models.document import Document
+    from app.db.models.parent_chunk import ParentChunk
+    from app.services.ingestion.pipeline import process_document_ingestion
+
+    pdf_path = "data/raw_corpus/nvidia_10k_sample.pdf"
+    assert os.path.exists(pdf_path)
+
+    doc = Document(
+        filename=f"retry_test_{uuid4().hex[:8]}.pdf",
+        file_hash=uuid4().hex,
+        title="Retry Idempotency Test Doc",
+        category="financial_report",
+        total_pages=3,
+        status="PENDING",
+        processing_stage="QUEUED",
+    )
+    db_session.add(doc)
+    await db_session.commit()
+    await db_session.refresh(doc)
+
+    provider = DummyEmbeddingProvider(settings.EMBEDDING_DIMENSION)
+
+    try:
+        # 1. Run pipeline first time
+        await process_document_ingestion(
+            document_id=doc.id,
+            file_path=Path(pdf_path),
+            session=db_session,
+            embedding_provider=provider,
+        )
+
+        # Count chunks and parents after first ingestion
+        res_chunks = await db_session.execute(
+            select(func.count(DocumentChunk.id)).where(DocumentChunk.document_id == doc.id)
+        )
+        initial_chunks = res_chunks.scalar_one()
+
+        res_parents = await db_session.execute(
+            select(func.count(ParentChunk.id)).where(ParentChunk.document_id == doc.id)
+        )
+        initial_parents = res_parents.scalar_one()
+
+        assert initial_chunks > 0
+        assert initial_parents > 0
+
+        # 2. Re-run pipeline for the same document (simulating worker crash & task retry)
+        await process_document_ingestion(
+            document_id=doc.id,
+            file_path=Path(pdf_path),
+            session=db_session,
+            embedding_provider=provider,
+        )
+
+        # Counts must remain identical, NOT doubled!
+        res_chunks_2 = await db_session.execute(
+            select(func.count(DocumentChunk.id)).where(DocumentChunk.document_id == doc.id)
+        )
+        retried_chunks = res_chunks_2.scalar_one()
+
+        res_parents_2 = await db_session.execute(
+            select(func.count(ParentChunk.id)).where(ParentChunk.document_id == doc.id)
+        )
+        retried_parents = res_parents_2.scalar_one()
+
+        assert retried_chunks == initial_chunks, (
+            f"Expected {initial_chunks} chunks after retry, got {retried_chunks}"
+        )
+        assert retried_parents == initial_parents, (
+            f"Expected {initial_parents} parents after retry, got {retried_parents}"
+        )
+    finally:
+        # Cleanup
+        from app.db.repositories.chunk_repo import ChunkRepository
+
+        chunk_repo = ChunkRepository(db_session)
+        if hasattr(chunk_repo, "delete_by_document"):
+            await chunk_repo.delete_by_document(doc.id)
+        await db_session.delete(doc)
+        await db_session.commit()

@@ -249,6 +249,26 @@ def calculate_mrr_at_k(retrieved: list[Any], query: GoldenQuery, k: int = 10) ->
     return 0.0
 
 
+def _get_expected_target_count(query: GoldenQuery) -> int:
+    """
+    Compute the number of distinct relevant targets expected in ideal ranking.
+    For multi-hop comparative queries, at least 2 distinct evidence targets
+    (or count of distinct expected documents/pages) are required.
+    For single-hop queries, 1 ideal chunk covers the required evidence.
+    """
+    if query.category == "multi_hop_comparative":
+        distinct_docs: list[str] = []
+        for doc in query.expected_documents:
+            if not any(_matches_document(doc, d) for d in distinct_docs):
+                distinct_docs.append(doc)
+        if len(distinct_docs) > 1:
+            return len(distinct_docs)
+        if len(query.expected_pages) > 1:
+            return len(query.expected_pages)
+        return 2
+    return 1
+
+
 def calculate_ndcg_at_k(retrieved: list[Any], query: GoldenQuery, k: int = 5) -> float:
     """
     Normalized Discounted Cumulative Gain (NDCG@K) with binary relevance and log2(i + 1) discount.
@@ -267,7 +287,9 @@ def calculate_ndcg_at_k(retrieved: list[Any], query: GoldenQuery, k: int = 5) ->
     if dcg <= 0.0:
         return 0.0
 
-    total_relevant = sum(1 for c in retrieved if is_relevant_hit(c, query))
+    hits_in_retrieved = sum(1 for c in retrieved if is_relevant_hit(c, query))
+    expected_targets = _get_expected_target_count(query)
+    total_relevant = max(hits_in_retrieved, expected_targets)
     ideal_k = min(total_relevant, k)
     if ideal_k <= 0:
         return 0.0

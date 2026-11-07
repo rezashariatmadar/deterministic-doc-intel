@@ -65,6 +65,9 @@ class MockRedis:
         self.expirations[name] = time
         return True
 
+    async def hlen(self, name: str) -> int:
+        return len(self.hashes.get(name, {}))
+
 
 def create_sample_rag_response(
     answer: str = "NVIDIA revenue grew to $47.5B [1].",
@@ -256,3 +259,54 @@ def test_canonical_scope_hash_determinism() -> None:
     hash_none = cache.canonical_scope_hash("hybrid", None)
     hash_empty = cache.canonical_scope_hash("hybrid", {})
     assert hash_none == hash_empty
+
+
+def test_canonical_scope_hash_top_k_and_reranker() -> None:
+    cache = SemanticCacheService(redis=AsyncMock())
+
+    # Varying top_k must produce distinct hashes
+    hash_k5 = cache.canonical_scope_hash("hybrid", top_k=5)
+    hash_k10 = cache.canonical_scope_hash("hybrid", top_k=10)
+    assert hash_k5 != hash_k10
+
+    # Varying enable_reranker must produce distinct hashes
+    hash_rerank_off = cache.canonical_scope_hash("hybrid", top_k=5, enable_reranker=False)
+    hash_rerank_on = cache.canonical_scope_hash("hybrid", top_k=5, enable_reranker=True)
+    assert hash_rerank_off != hash_rerank_on
+
+
+@pytest.mark.asyncio
+async def test_l2_normalization_non_unit_vectors() -> None:
+    redis = MockRedis()
+    cache = SemanticCacheService(redis=redis, threshold=0.94)
+    scope_hash = cache.canonical_scope_hash("hybrid")
+
+    # Storing non-unit vector [5.0, 0.0, 0.0]
+    stored_vec = [5.0, 0.0, 0.0]
+    response = create_sample_rag_response()
+    await cache.store(stored_vec, scope_hash, response)
+
+    # Looking up with non-unit vector [10.0, 0.0, 0.0]
+    # Without L2 normalization, dot product = 50.0 (wrong metric space).
+    # With L2 normalization, cosine similarity = 1.0!
+    lookup_vec = [10.0, 0.0, 0.0]
+    hit_res, score = await cache.lookup(lookup_vec, scope_hash)
+    assert hit_res is not None
+    assert pytest.approx(score, abs=1e-4) == 1.0
+
+
+@pytest.mark.asyncio
+async def test_redis_hash_bounded_eviction_at_200() -> None:
+    redis = MockRedis()
+    cache = SemanticCacheService(redis=redis, threshold=0.94)
+    scope_hash = cache.canonical_scope_hash("hybrid")
+
+    # Store 205 responses into the same scope
+    for i in range(205):
+        resp = create_sample_rag_response(answer=f"Answer {i} [1].")
+        await cache.store([1.0, float(i) * 0.001, 0.0], scope_hash, resp)
+
+    scope_key = f"semcache:scope:{scope_hash}"
+    final_len = await redis.hlen(scope_key)
+    # Must be bounded at 200, oldest entries evicted
+    assert final_len <= 200

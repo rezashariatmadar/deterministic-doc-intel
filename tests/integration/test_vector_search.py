@@ -109,7 +109,7 @@ async def test_vector_search_executes_and_filters(db_session: AsyncSession) -> N
         # 1. Search with similarity threshold 0.35 (should only retrieve the similar chunk)
         results = await service.search(
             query="What was Data Center revenue?",
-            filters=QueryFilters(min_similarity=0.35),
+            filters=QueryFilters(min_similarity=0.35, document_id=doc.id),
             top_k=5,
         )
 
@@ -130,7 +130,7 @@ async def test_vector_search_executes_and_filters(db_session: AsyncSession) -> N
         # 2. Search filtering for element_type "table" (similar chunk is "prose")
         table_results = await service.search(
             query="What was Data Center revenue?",
-            filters=QueryFilters(min_similarity=0.35, element_types=["table"]),
+            filters=QueryFilters(min_similarity=0.35, element_types=["table"], document_id=doc.id),
             top_k=5,
         )
         assert len(table_results) == 0
@@ -138,13 +138,14 @@ async def test_vector_search_executes_and_filters(db_session: AsyncSession) -> N
         # 3. Context window budgeting test
         budgeted_results = await service.search(
             query="What was Data Center revenue?",
-            filters=QueryFilters(min_similarity=0.35),
+            filters=QueryFilters(min_similarity=0.35, document_id=doc.id),
             top_k=5,
             max_tokens=5,  # Token limit lower than chunk's 18 tokens
         )
         assert len(budgeted_results) == 0
 
     finally:
+        await chunk_repo.delete_by_document(doc.id)
         await doc_repo.delete(doc.id)
 
 

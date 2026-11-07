@@ -274,6 +274,35 @@ class TestNDCGAtK:
         assert calculate_ndcg_at_k([make_chunk(doc_title="bad.pdf")], base_query, k=5) == 0.0
         assert calculate_ndcg_at_k([make_chunk()], unanswerable_query, k=5) == 0.0
 
+    def test_ndcg_multi_hop_partial_retrieval_below_one(self) -> None:
+        multi_hop_query = GoldenQuery(
+            id="q13",
+            category="multi_hop_comparative",
+            query="Compare NVIDIA revenue with Apple net sales.",
+            expected_documents=["nvidia_10k_sample.pdf", "Apple_10-K-Q4-2023-As-Filed.pdf"],
+            expected_pages=[2, 31],
+            required_substrings=["60,922", "383,285"],
+            ground_truth_answer="Revenue was 60,922 vs 383,285.",
+            is_answerable=True,
+        )
+        # Only 1 of 2 targets retrieved at rank 1, second chunk is irrelevant
+        c_hit = make_chunk(
+            doc_title="nvidia_10k_sample.pdf",
+            page_start=2,
+            page_end=2,
+            text="NVIDIA revenue was 60,922 million.",
+            source_id=1,
+        )
+        c_miss = make_chunk(doc_title="irrelevant.pdf", source_id=2)
+
+        # In a 2-target query, retrieving only 1 target must not give NDCG=1.0!
+        # Ideal DCG for 2 items is 1/log2(2) + 1/log2(3) = 1.6309.
+        # DCG achieved is 1/log2(2) = 1.0.
+        # NDCG should be 1.0 / 1.6309 = 0.6131.
+        score = calculate_ndcg_at_k([c_hit, c_miss], multi_hop_query, k=5)
+        assert score < 1.0
+        assert score == pytest.approx(1.0 / (1.0 + (1.0 / math.log2(3))), 1e-4)
+
 
 class TestRetrievalEvaluator:
     @pytest.mark.asyncio
