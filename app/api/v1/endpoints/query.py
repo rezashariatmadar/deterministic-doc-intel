@@ -1,6 +1,7 @@
 """Query endpoints for grounded answers and real-time Server-Sent Events (SSE) streaming."""
 
 import json
+import logging
 import time
 import uuid
 from collections.abc import AsyncGenerator
@@ -19,6 +20,8 @@ from app.services.retrieval.generator import GroundedGenerator
 from app.services.retrieval.reranker import CrossEncoderReranker
 from app.services.retrieval.vector_search import VectorSearchService
 from app.services.telemetry.cost import CostEstimator
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -68,7 +71,11 @@ async def query_rag(
     prompt_text = f"{context_xml}\n{request.query}"
     prompt_tokens = CostEstimator.estimate_tokens(prompt_text, model=model_name)
     completion_tokens = CostEstimator.estimate_tokens(rag_response.answer, model=model_name)
-    embedding_tokens = CostEstimator.estimate_tokens(request.query)
+    embedding_tokens = (
+        CostEstimator.estimate_tokens(request.query)
+        if request.search_mode in ("hybrid", "dense")
+        else 0
+    )
 
     cost_usd = CostEstimator.estimate_cost(
         model=model_name,
@@ -97,8 +104,11 @@ async def query_rag(
         estimated_cost_usd=cost_usd,
     )
 
-    telemetry_repo = TelemetryRepository(db)
-    await telemetry_repo.log_query(log_entry)
+    try:
+        telemetry_repo = TelemetryRepository(db)
+        await telemetry_repo.log_query(log_entry)
+    except Exception as exc:
+        logger.warning("Failed to persist query telemetry: %s", exc)
 
     return rag_response
 
@@ -112,6 +122,7 @@ async def stream_query_rag(
     reranker: CrossEncoderReranker | None = Depends(get_reranker),
 ) -> StreamingResponse:
     """Stream grounded answer tokens via Server-Sent Events (SSE)."""
+    request_t0 = time.perf_counter()
     search_service = VectorSearchService(
         session=db,
         embedding_provider=embedding_provider,
@@ -205,7 +216,11 @@ async def stream_query_rag(
                 completion_tokens = CostEstimator.estimate_tokens(
                     rag_response.answer, model=model_name
                 )
-                embedding_tokens = CostEstimator.estimate_tokens(request.query)
+                embedding_tokens = (
+                    CostEstimator.estimate_tokens(request.query)
+                    if request.search_mode in ("hybrid", "dense")
+                    else 0
+                )
 
                 cost_usd = CostEstimator.estimate_cost(
                     model=model_name,
@@ -214,6 +229,7 @@ async def stream_query_rag(
                     embedding_tokens=embedding_tokens,
                 )
 
+                total_latency_ms = round((time.perf_counter() - request_t0) * 1000.0, 2)
                 log_entry = QueryLogCreate(
                     request_id=str(uuid.uuid4()),
                     query_text=request.query,
@@ -227,7 +243,7 @@ async def stream_query_rag(
                     sparse_search_ms=stage_latencies.get("sparse_search_ms", 0.0),
                     rerank_ms=stage_latencies.get("rerank_ms", 0.0),
                     llm_ttft_ms=round(ttft_ms, 2) if ttft_ms is not None else None,
-                    total_latency_ms=round(rag_response.latency_ms, 2),
+                    total_latency_ms=total_latency_ms,
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
                     embedding_tokens=embedding_tokens,
@@ -235,8 +251,8 @@ async def stream_query_rag(
                 )
                 telemetry_repo = TelemetryRepository(stream_db)
                 await telemetry_repo.log_query(log_entry)
-        except Exception:
-            pass  # Fail-safe: streaming event publisher completes cleanly
+        except Exception as exc:
+            logger.warning("Failed to persist streaming query telemetry: %s", exc)
 
     return StreamingResponse(
         sse_event_publisher(),

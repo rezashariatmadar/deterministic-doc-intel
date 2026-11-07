@@ -179,5 +179,89 @@ async def test_query_endpoint_persists_telemetry(db_session):
         assert log_entry.total_latency_ms > 0
         assert log_entry.prompt_tokens >= 0
         assert log_entry.completion_tokens >= 0
+        assert log_entry.embedding_tokens > 0
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_sparse_query_zero_embedding_tokens(db_session):
+    """Verify that sparse search queries account for 0 embedding tokens."""
+    dim = 1024
+    app.dependency_overrides[get_embedding] = lambda: DummyEmbeddingProvider(dimension=dim)
+    app.dependency_overrides[get_llm] = lambda: DummyLLMProvider()
+
+    query_text = f"What was the sparse query revenue? {uuid.uuid4().hex}"
+
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/api/v1/query",
+                json={
+                    "query": query_text,
+                    "search_mode": "sparse",
+                    "top_k": 3,
+                },
+            )
+            assert resp.status_code == 200
+
+        from sqlalchemy import select
+
+        stmt = (
+            select(QueryLog)
+            .where(QueryLog.query_text == query_text)
+            .order_by(QueryLog.created_at.desc())
+        )
+        result = await db_session.execute(stmt)
+        log_entry = result.scalars().first()
+
+        assert log_entry is not None
+        assert log_entry.search_mode == "sparse"
+        assert log_entry.embedding_tokens == 0
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_stream_query_endpoint_persists_telemetry(db_session):
+    """Verify that calling POST /api/v1/query/stream generates and persists a QueryLog."""
+    dim = 1024
+    app.dependency_overrides[get_embedding] = lambda: DummyEmbeddingProvider(dimension=dim)
+    app.dependency_overrides[get_llm] = lambda: DummyLLMProvider()
+
+    query_text = f"What was the stream revenue growth? {uuid.uuid4().hex}"
+
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/api/v1/query/stream",
+                json={
+                    "query": query_text,
+                    "search_mode": "hybrid",
+                    "top_k": 3,
+                },
+            )
+            assert resp.status_code == 200
+            # Read full stream content to let sse_event_publisher complete
+            _ = resp.text
+
+        from sqlalchemy import select
+
+        stmt = (
+            select(QueryLog)
+            .where(QueryLog.query_text == query_text)
+            .order_by(QueryLog.created_at.desc())
+        )
+        result = await db_session.execute(stmt)
+        log_entry = result.scalars().first()
+
+        assert log_entry is not None
+        assert log_entry.search_mode == "hybrid"
+        assert log_entry.total_latency_ms > 0
+        assert log_entry.llm_ttft_ms is not None
+        assert log_entry.prompt_tokens >= 0
+        assert log_entry.completion_tokens >= 0
     finally:
         app.dependency_overrides.clear()
