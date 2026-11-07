@@ -57,6 +57,7 @@ class VectorSearchService:
         enable_reranker: bool | None = None,
         enable_query_rewrite: bool = False,
         enable_hyde: bool = False,
+        resolve_parents: bool = True,
     ) -> list[RetrievedChunk]:
         """
         Execute dense, sparse, or hybrid retrieval with optional query expansion,
@@ -255,31 +256,34 @@ class VectorSearchService:
         }
 
         # 6. Hierarchical parent resolution & deduplication
-        parent_ids: list[UUID] = [
-            c.parent_chunk_id for c in candidates if c.parent_chunk_id is not None
-        ]
-        parent_map = await self.chunk_repo.get_parents_by_ids(parent_ids) if parent_ids else {}
-
         resolved_chunks: list[RetrievedChunk] = []
-        seen_parent_ids: set[UUID] = set()
+        if resolve_parents:
+            parent_ids: list[UUID] = [
+                c.parent_chunk_id for c in candidates if c.parent_chunk_id is not None
+            ]
+            parent_map = await self.chunk_repo.get_parents_by_ids(parent_ids) if parent_ids else {}
 
-        for c in candidates:
-            if c.parent_chunk_id and c.parent_chunk_id in parent_map:
-                if c.parent_chunk_id in seen_parent_ids:
-                    # Deduplicate child chunks sharing the same parent
-                    continue
-                seen_parent_ids.add(c.parent_chunk_id)
-                parent = parent_map[c.parent_chunk_id]
-                # Swap chunk text to parent's broader context for quote verification
-                c.text = parent.raw_text
-                c.contextualized_text = parent.contextualized_text
-                c.page_start = parent.page_start
-                c.page_end = parent.page_end
-                c.section_path = parent.section_path
-                c.token_count = parent.token_count
-                resolved_chunks.append(c)
-            else:
-                resolved_chunks.append(c)
+            seen_parent_ids: set[UUID] = set()
+
+            for c in candidates:
+                if c.parent_chunk_id and c.parent_chunk_id in parent_map:
+                    if c.parent_chunk_id in seen_parent_ids:
+                        # Deduplicate child chunks sharing the same parent
+                        continue
+                    seen_parent_ids.add(c.parent_chunk_id)
+                    parent = parent_map[c.parent_chunk_id]
+                    # Swap chunk text to parent's broader context for quote verification
+                    c.text = parent.raw_text
+                    c.contextualized_text = parent.contextualized_text
+                    c.page_start = parent.page_start
+                    c.page_end = parent.page_end
+                    c.section_path = parent.section_path
+                    c.token_count = parent.token_count
+                    resolved_chunks.append(c)
+                else:
+                    resolved_chunks.append(c)
+        else:
+            resolved_chunks = candidates
 
         # 7. Token budgeting & 1-based sequential source_id re-indexing
         results: list[RetrievedChunk] = []
