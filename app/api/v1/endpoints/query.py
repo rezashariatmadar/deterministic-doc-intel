@@ -2,6 +2,7 @@
 
 import json
 import time
+import uuid
 from collections.abc import AsyncGenerator
 
 from fastapi import APIRouter, Depends
@@ -9,11 +10,15 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_db, get_embedding, get_llm, get_reranker
+from app.db.repositories.telemetry import TelemetryRepository
+from app.db.session import async_session_maker
+from app.schemas.metrics import QueryLogCreate
 from app.schemas.query import QueryRequest, RAGResponse
 from app.services.providers.base import EmbeddingProvider, LLMProvider
 from app.services.retrieval.generator import GroundedGenerator
 from app.services.retrieval.reranker import CrossEncoderReranker
 from app.services.retrieval.vector_search import VectorSearchService
+from app.services.telemetry.cost import CostEstimator
 
 router = APIRouter()
 
@@ -27,6 +32,7 @@ async def query_rag(
     reranker: CrossEncoderReranker | None = Depends(get_reranker),
 ) -> RAGResponse:
     """Execute vector search and generate grounded answer with citations and confidence score."""
+    start_time = time.perf_counter()
     search_service = VectorSearchService(
         session=db,
         embedding_provider=embedding_provider,
@@ -46,7 +52,55 @@ async def query_rag(
     )
 
     generator = GroundedGenerator(llm_provider=llm_provider)
-    return await generator.generate(query=request.query, chunks=chunks)
+    rag_response = await generator.generate(query=request.query, chunks=chunks)
+    total_latency_ms = (time.perf_counter() - start_time) * 1000.0
+
+    # Extract stage latencies and top reranker score
+    stage_latencies = search_service.last_stage_latencies
+    top_reranker_score: float | None = None
+    if chunks:
+        rerank_scores = [c.rerank_score for c in chunks if c.rerank_score is not None]
+        if rerank_scores:
+            top_reranker_score = max(rerank_scores)
+
+    model_name = getattr(llm_provider, "model_name", "gpt-4o-mini")
+    context_xml = generator.build_context_xml(chunks) if chunks else ""
+    prompt_text = f"{context_xml}\n{request.query}"
+    prompt_tokens = CostEstimator.estimate_tokens(prompt_text, model=model_name)
+    completion_tokens = CostEstimator.estimate_tokens(rag_response.answer, model=model_name)
+    embedding_tokens = CostEstimator.estimate_tokens(request.query)
+
+    cost_usd = CostEstimator.estimate_cost(
+        model=model_name,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        embedding_tokens=embedding_tokens,
+    )
+
+    log_entry = QueryLogCreate(
+        request_id=str(uuid.uuid4()),
+        query_text=request.query,
+        search_mode=request.search_mode,
+        cache_hit=False,
+        is_answerable=rag_response.is_answerable,
+        confidence_score=rag_response.confidence_score,
+        top_reranker_score=top_reranker_score,
+        rewrite_ms=stage_latencies.get("rewrite_ms", 0.0),
+        dense_search_ms=stage_latencies.get("dense_search_ms", 0.0),
+        sparse_search_ms=stage_latencies.get("sparse_search_ms", 0.0),
+        rerank_ms=stage_latencies.get("rerank_ms", 0.0),
+        llm_ttft_ms=None,
+        total_latency_ms=round(total_latency_ms, 2),
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        embedding_tokens=embedding_tokens,
+        estimated_cost_usd=cost_usd,
+    )
+
+    telemetry_repo = TelemetryRepository(db)
+    await telemetry_repo.log_query(log_entry)
+
+    return rag_response
 
 
 @router.post("/query/stream")
@@ -75,6 +129,13 @@ async def stream_query_rag(
         enable_query_rewrite=request.enable_query_rewrite,
         enable_hyde=request.enable_hyde,
     )
+    stage_latencies = dict(search_service.last_stage_latencies)
+    top_reranker_score: float | None = None
+    if chunks:
+        rerank_scores = [c.rerank_score for c in chunks if c.rerank_score is not None]
+        if rerank_scores:
+            top_reranker_score = max(rerank_scores)
+
     # Release DB connection immediately so connection pool is not starved during LLM streaming
     await db.close()
 
@@ -98,7 +159,10 @@ async def stream_query_rag(
 
         # Stream generated response tokens while accumulating full answer
         accumulated_tokens: list[str] = []
+        ttft_ms: float | None = None
         async for token in stream_gen:
+            if ttft_ms is None and len(accumulated_tokens) == 0:
+                ttft_ms = (time.perf_counter() - start_time) * 1000.0
             accumulated_tokens.append(token)
             yield f"data: {json.dumps({'event': 'token', 'content': token})}\n\n"
 
@@ -130,6 +194,49 @@ async def stream_query_rag(
         }
         yield f"data: {json.dumps({'event': 'verification', 'data': verification_payload})}\n\n"
         yield "data: [DONE]\n\n"
+
+        # Persist streaming query telemetry asynchronously
+        try:
+            async with async_session_maker() as stream_db:
+                model_name = getattr(llm_provider, "model_name", "gpt-4o-mini")
+                context_xml = generator.build_context_xml(chunks) if chunks else ""
+                prompt_text = f"{context_xml}\n{request.query}"
+                prompt_tokens = CostEstimator.estimate_tokens(prompt_text, model=model_name)
+                completion_tokens = CostEstimator.estimate_tokens(
+                    rag_response.answer, model=model_name
+                )
+                embedding_tokens = CostEstimator.estimate_tokens(request.query)
+
+                cost_usd = CostEstimator.estimate_cost(
+                    model=model_name,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    embedding_tokens=embedding_tokens,
+                )
+
+                log_entry = QueryLogCreate(
+                    request_id=str(uuid.uuid4()),
+                    query_text=request.query,
+                    search_mode=request.search_mode,
+                    cache_hit=False,
+                    is_answerable=rag_response.is_answerable,
+                    confidence_score=rag_response.confidence_score,
+                    top_reranker_score=top_reranker_score,
+                    rewrite_ms=stage_latencies.get("rewrite_ms", 0.0),
+                    dense_search_ms=stage_latencies.get("dense_search_ms", 0.0),
+                    sparse_search_ms=stage_latencies.get("sparse_search_ms", 0.0),
+                    rerank_ms=stage_latencies.get("rerank_ms", 0.0),
+                    llm_ttft_ms=round(ttft_ms, 2) if ttft_ms is not None else None,
+                    total_latency_ms=round(rag_response.latency_ms, 2),
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    embedding_tokens=embedding_tokens,
+                    estimated_cost_usd=cost_usd,
+                )
+                telemetry_repo = TelemetryRepository(stream_db)
+                await telemetry_repo.log_query(log_entry)
+        except Exception:
+            pass  # Fail-safe: streaming event publisher completes cleanly
 
     return StreamingResponse(
         sse_event_publisher(),

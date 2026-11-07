@@ -26,6 +26,8 @@ class DocumentRead(DocumentBase):
     total_pages: int
     total_chunks: int
     status: str
+    task_id: str | None = None
+    processing_stage: str | None = None
     error_message: str | None = None
     created_at: datetime
     updated_at: datetime

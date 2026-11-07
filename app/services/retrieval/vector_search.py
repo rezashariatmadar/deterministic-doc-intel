@@ -1,5 +1,6 @@
 """Hybrid retrieval service with RRF fusion, Cross-Encoder reranking, and parent resolution."""
 
+import time
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,6 +38,12 @@ class VectorSearchService:
             else (CrossEncoderReranker() if self.settings.ENABLE_RERANKER else None)
         )
         self.transformer = QueryTransformer(llm_provider) if llm_provider else None
+        self.last_stage_latencies: dict[str, float] = {
+            "rewrite_ms": 0.0,
+            "dense_search_ms": 0.0,
+            "sparse_search_ms": 0.0,
+            "rerank_ms": 0.0,
+        }
 
     async def search(
         self,
@@ -62,6 +69,7 @@ class VectorSearchService:
         semantic_query = query
         lexical_query = query
         sub_queries: list[str] = []
+        rewrite_t0 = time.perf_counter()
         if enable_query_rewrite and self.transformer:
             transformed = await self.transformer.transform(query, enable_hyde=enable_hyde)
             semantic_query = transformed.semantic_query
@@ -71,6 +79,7 @@ class VectorSearchService:
             ]
             if enable_hyde and transformed.hypothetical_passage:
                 semantic_query = f"{semantic_query} {transformed.hypothetical_passage}"
+        rewrite_ms = (time.perf_counter() - rewrite_t0) * 1000.0
 
         # 2. Extract metadata pre-filters
         min_similarity = (
@@ -88,8 +97,11 @@ class VectorSearchService:
         candidate_k = self.settings.HYBRID_SEARCH_CANDIDATES if search_mode == "hybrid" else top_k
         dense_results: list[tuple[Any, float]] = []
         sparse_results: list[tuple[Any, float]] = []
+        dense_ms = 0.0
+        sparse_ms = 0.0
 
         if search_mode in ("hybrid", "dense"):
+            dense_t0 = time.perf_counter()
             query_vector = await self.embedding_provider.embed_query(semantic_query)
             dense_results = await self.chunk_repo.search_similar(
                 query_vector=query_vector,
@@ -122,8 +134,10 @@ class VectorSearchService:
                 dense_results = sorted(seen_dense.values(), key=lambda x: x[1], reverse=True)[
                     :candidate_k
                 ]
+            dense_ms = (time.perf_counter() - dense_t0) * 1000.0
 
         if search_mode in ("hybrid", "sparse"):
+            sparse_t0 = time.perf_counter()
             sparse_results = await self.chunk_repo.search_lexical(
                 query=lexical_query,
                 top_k=candidate_k,
@@ -151,6 +165,7 @@ class VectorSearchService:
                 sparse_results = sorted(seen_sparse.values(), key=lambda x: x[1], reverse=True)[
                     :candidate_k
                 ]
+            sparse_ms = (time.perf_counter() - sparse_t0) * 1000.0
 
         # 4. Score fusion & RetrievedChunk construction
         w_dense = weight_dense if weight_dense is not None else self.settings.WEIGHT_DENSE
@@ -218,16 +233,26 @@ class VectorSearchService:
             )
 
         # 5. Cross-Encoder neural reranking (if enabled and candidates exist)
+        rerank_ms = 0.0
         should_rerank = (
             enable_reranker if enable_reranker is not None else self.settings.ENABLE_RERANKER
         )
         if should_rerank and self.reranker and candidates:
+            rerank_t0 = time.perf_counter()
             candidates = await self.reranker.rerank(
                 query=query,
                 chunks=candidates,
                 top_n=top_k * 2,
                 threshold=self.settings.RERANKER_THRESHOLD,
             )
+            rerank_ms = (time.perf_counter() - rerank_t0) * 1000.0
+
+        self.last_stage_latencies = {
+            "rewrite_ms": round(rewrite_ms, 2),
+            "dense_search_ms": round(dense_ms, 2),
+            "sparse_search_ms": round(sparse_ms, 2),
+            "rerank_ms": round(rerank_ms, 2),
+        }
 
         # 6. Hierarchical parent resolution & deduplication
         parent_ids: list[UUID] = [

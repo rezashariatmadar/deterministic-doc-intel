@@ -45,6 +45,17 @@ class Document(Base):
         index=True,
         comment="PENDING | PROCESSING | COMPLETED | FAILED",
     )
+    task_id: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+        comment="Celery background task ID",
+    )
+    processing_stage: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="QUEUED | PARSING | CHUNKING | EMBEDDING | INDEXING | COMPLETED | FAILED",
+    )
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     extra_metadata: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
