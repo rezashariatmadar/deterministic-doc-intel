@@ -13,6 +13,9 @@ from app.core.exceptions import (
     DocumentNotFoundError,
     DuplicateDocumentError,
     IngestionError,
+    PromptInjectionError,
+    RateLimitExceededError,
+    SafeSQLError,
 )
 from app.core.logging import correlation_id_ctx
 
@@ -70,6 +73,36 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=500,
             content={"error": "ConfigurationError", "message": exc.message},
+        )
+
+    @app.exception_handler(PromptInjectionError)
+    async def prompt_injection_handler(request: Request, exc: PromptInjectionError) -> JSONResponse:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "PromptInjectionError",
+                "message": exc.message,
+                "details": exc.details,
+            },
+        )
+
+    @app.exception_handler(RateLimitExceededError)
+    async def rate_limit_handler(request: Request, exc: RateLimitExceededError) -> JSONResponse:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": "RateLimitExceeded",
+                "message": exc.message,
+                "retry_after": exc.retry_after,
+            },
+            headers={"Retry-After": str(exc.retry_after)},
+        )
+
+    @app.exception_handler(SafeSQLError)
+    async def safe_sql_handler(request: Request, exc: SafeSQLError) -> JSONResponse:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "SafeSQLError", "message": exc.message, "query": exc.query},
         )
 
     @app.exception_handler(AppException)

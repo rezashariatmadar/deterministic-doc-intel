@@ -191,6 +191,7 @@ class GroundedGenerator:
                                 supporting_quote=res.verified_quote,
                                 quote=res.verified_quote,
                                 bbox=chunk.bbox,
+                                source_type=chunk.source_type,
                                 metadata=chunk.metadata,
                             )
                         )

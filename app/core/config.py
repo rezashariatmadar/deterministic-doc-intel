@@ -72,6 +72,18 @@ class Settings(BaseSettings):
     RERANKER_THRESHOLD: float = 0.05
     RERANKER_TIMEOUT_MS: int = 500
 
+    # Phase 4: Self-Correcting Agentic RAG, Text-to-SQL, Memory & Guardrails
+    SQL_EXECUTION_TIMEOUT_MS: int = 3000
+    MAX_SQL_CORRECTION_RETRIES: int = 1
+    MAX_CRAG_RETRIES: int = 2
+    CRAG_FALLBACK_SIMILARITY: float = 0.25
+    ENABLE_EXTERNAL_FALLBACK: bool = False
+    CHAT_SESSION_TTL: int = 86400
+    CHAT_SESSION_MAX_TURNS: int = 6
+    RATE_LIMIT_REQUESTS: int = 60
+    RATE_LIMIT_WINDOW_SECONDS: int = 60
+    PROMPT_INJECTION_THRESHOLD: float = 0.8
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

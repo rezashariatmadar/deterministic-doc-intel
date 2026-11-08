@@ -161,3 +161,73 @@ class ConfigurationError(AppException):
 
     status_code: int = 500
     error_code: str = "CONFIGURATION_ERROR"
+
+
+class PromptInjectionError(AppException):
+    """Raised when a prompt injection attempt is detected in user input."""
+
+    status_code: int = 400
+    error_code: str = "PROMPT_INJECTION_DETECTED"
+
+    def __init__(
+        self,
+        message: str = "Prompt injection attempt detected.",
+        pattern: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        details = details or {}
+        if pattern:
+            details["pattern"] = pattern
+        super().__init__(message=message, details=details)
+        self.pattern = pattern
+
+
+class RateLimitExceededError(AppException):
+    """Raised when client exceeds the allowed request rate limit."""
+
+    status_code: int = 429
+    error_code: str = "RATE_LIMIT_EXCEEDED"
+
+    def __init__(
+        self,
+        message: str = "Rate limit exceeded. Please try again later.",
+        retry_after: int = 60,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        details = details or {}
+        details["retry_after"] = retry_after
+        super().__init__(message=message, details=details)
+        self.retry_after = retry_after
+
+
+class SafeSQLError(AppException):
+    """Raised when a generated SQL query fails security checks or execution validation."""
+
+    status_code: int = 400
+    error_code: str = "SAFE_SQL_ERROR"
+
+    def __init__(
+        self,
+        message: str,
+        query: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        details = details or {}
+        if query:
+            details["query"] = query
+        super().__init__(message=message, details=details)
+        self.query = query
+
+
+class AgentOrchestrationError(AppException):
+    """Raised when agent execution state machine encounters an unrecoverable failure."""
+
+    status_code: int = 500
+    error_code: str = "AGENT_ORCHESTRATION_ERROR"
+
+
+class ExternalSearchError(AppException):
+    """Raised when external web fallback retrieval fails or is rejected."""
+
+    status_code: int = 502
+    error_code: str = "EXTERNAL_SEARCH_ERROR"
