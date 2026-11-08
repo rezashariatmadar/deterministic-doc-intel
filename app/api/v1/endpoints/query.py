@@ -104,6 +104,8 @@ async def query_rag(
                 response.headers["X-Cache-Hit"] = "true"
                 total_latency_ms = (time.perf_counter() - start_time) * 1000.0
                 cached_response.latency_ms = round(total_latency_ms, 2)
+                if effective_query != sanitized_query and cached_response.rewritten_query is None:
+                    cached_response.rewritten_query = effective_query
 
                 # Persist turn to conversational memory
                 if request.session_id:
@@ -122,6 +124,7 @@ async def query_rag(
 
                 log_entry = QueryLogCreate(
                     request_id=get_correlation_id() or str(uuid.uuid4()),
+                    session_id=request.session_id,
                     query_text=effective_query,
                     search_mode=request.search_mode,
                     cache_hit=True,
@@ -203,6 +206,8 @@ async def query_rag(
 
     total_latency_ms = (time.perf_counter() - start_time) * 1000.0
     rag_response.latency_ms = round(total_latency_ms, 2)
+    if effective_query != sanitized_query and rag_response.rewritten_query is None:
+        rag_response.rewritten_query = effective_query
 
     # 6. Save turn to conversational memory
     if request.session_id:
@@ -262,6 +267,7 @@ async def query_rag(
 
     log_entry = QueryLogCreate(
         request_id=get_correlation_id() or str(uuid.uuid4()),
+        session_id=request.session_id,
         query_text=effective_query,
         search_mode=request.search_mode,
         cache_hit=False,
@@ -339,6 +345,8 @@ async def stream_query_rag(
             )
             if cached_response is not None:
                 await db.close()
+                if effective_query != sanitized_query and cached_response.rewritten_query is None:
+                    cached_response.rewritten_query = effective_query
 
                 if request.session_id:
                     await conversation_memory.add_turn(
@@ -380,6 +388,16 @@ async def stream_query_rag(
                         "confidence_score": cached_response.confidence_score,
                         "has_unverified": "[unverified:" in cached_response.answer,
                         "latency_ms": cached_response.latency_ms,
+                        "candidate_facts": [
+                            f.model_dump() for f in cached_response.candidate_facts
+                        ],
+                        "execution_trace": [
+                            t.model_dump() for t in cached_response.execution_trace
+                        ],
+                        "route": cached_response.route.value if cached_response.route else None,
+                        "crag_retry_count": cached_response.crag_retry_count,
+                        "sql_query_executed": cached_response.sql_query_executed,
+                        "rewritten_query": cached_response.rewritten_query,
                     }
                     verif_msg = json.dumps({"event": "verification", "data": verification_payload})
                     yield f"data: {verif_msg}\n\n"
@@ -399,6 +417,7 @@ async def stream_query_rag(
                             total_latency_ms = round((time.perf_counter() - request_t0) * 1000.0, 2)
                             log_entry = QueryLogCreate(
                                 request_id=get_correlation_id() or str(uuid.uuid4()),
+                                session_id=request.session_id,
                                 query_text=effective_query,
                                 search_mode=request.search_mode,
                                 cache_hit=True,
@@ -456,7 +475,16 @@ async def stream_query_rag(
             route_override=request.route_override,
             max_crag_retries=request.max_crag_retries,
         )
-        agent_response = await orchestrator.run(initial_state)
+        try:
+            agent_response = await orchestrator.run(initial_state)
+        finally:
+            await db.close()
+
+        total_latency_ms = round((time.perf_counter() - request_t0) * 1000.0, 2)
+        agent_response.latency_ms = total_latency_ms
+
+        if effective_query != sanitized_query and agent_response.rewritten_query is None:
+            agent_response.rewritten_query = effective_query
 
         async def sse_agent_publisher() -> AsyncGenerator[str, None]:
             sources_payload = [
@@ -497,6 +525,8 @@ async def stream_query_rag(
                 "execution_trace": [t.model_dump() for t in agent_response.execution_trace],
                 "route": agent_response.route.value if agent_response.route else None,
                 "crag_retry_count": agent_response.crag_retry_count,
+                "sql_query_executed": agent_response.sql_query_executed,
+                "rewritten_query": agent_response.rewritten_query,
             }
             verif_msg = json.dumps({"event": "verification", "data": verification_payload})
             yield f"data: {verif_msg}\n\n"
@@ -511,6 +541,87 @@ async def stream_query_rag(
                     logger.warning(
                         "Failed to save agent stream turn to conversational memory: %s", exc
                     )
+
+            if semantic_cache is not None:
+                try:
+                    sc_hash = semantic_cache.canonical_scope_hash(
+                        search_mode=request.search_mode,
+                        filters=request.filters,
+                        top_k=request.top_k,
+                        enable_reranker=request.enable_reranker,
+                    )
+                    q_vec = await embedding_provider.embed_query(effective_query)
+                    await semantic_cache.store(
+                        query_vector=q_vec,
+                        scope_hash=sc_hash,
+                        response=agent_response,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to store agent stream query response to semantic cache: %s", exc
+                    )
+
+            try:
+                async with async_session_maker() as stream_db:
+                    model_name = getattr(llm_provider, "model_name", "gpt-4o-mini")
+                    generator_helper = GroundedGenerator(llm_provider=llm_provider)
+                    context_xml = (
+                        generator_helper.build_context_xml(agent_response.sources)
+                        if agent_response.sources
+                        else ""
+                    )
+                    prompt_text = f"{context_xml}\n{effective_query}"
+                    prompt_tokens = CostEstimator.estimate_tokens(prompt_text, model=model_name)
+                    completion_tokens = CostEstimator.estimate_tokens(
+                        agent_response.answer, model=model_name
+                    )
+                    embedding_tokens = (
+                        CostEstimator.estimate_tokens(effective_query)
+                        if request.search_mode in ("hybrid", "dense")
+                        else 0
+                    )
+                    cost_usd = CostEstimator.estimate_cost(
+                        model=model_name,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        embedding_tokens=embedding_tokens,
+                    )
+
+                    total_latency_ms = agent_response.latency_ms
+                    top_reranker_score: float | None = None
+                    if agent_response.sources:
+                        rerank_scores = [
+                            c.rerank_score
+                            for c in agent_response.sources
+                            if c.rerank_score is not None
+                        ]
+                        if rerank_scores:
+                            top_reranker_score = max(rerank_scores)
+
+                    log_entry = QueryLogCreate(
+                        request_id=get_correlation_id() or str(uuid.uuid4()),
+                        session_id=request.session_id,
+                        query_text=effective_query,
+                        search_mode=request.search_mode,
+                        cache_hit=False,
+                        is_answerable=agent_response.is_answerable,
+                        confidence_score=agent_response.confidence_score,
+                        top_reranker_score=top_reranker_score,
+                        rewrite_ms=0.0,
+                        dense_search_ms=0.0,
+                        sparse_search_ms=0.0,
+                        rerank_ms=0.0,
+                        llm_ttft_ms=None,
+                        total_latency_ms=total_latency_ms,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        embedding_tokens=embedding_tokens,
+                        estimated_cost_usd=cost_usd,
+                    )
+                    telemetry_repo = TelemetryRepository(stream_db)
+                    await telemetry_repo.log_query(log_entry)
+            except Exception as exc:
+                logger.warning("Failed to persist agent streaming query telemetry: %s", exc)
 
         return StreamingResponse(
             sse_agent_publisher(),
@@ -530,17 +641,20 @@ async def stream_query_rag(
         llm_provider=llm_provider,
         reranker=reranker,
     )
-    chunks = await search_service.search(
-        query=effective_query,
-        filters=request.filters,
-        top_k=request.top_k,
-        search_mode=request.search_mode,
-        weight_dense=request.weight_dense,
-        weight_sparse=request.weight_sparse,
-        enable_reranker=request.enable_reranker,
-        enable_query_rewrite=request.enable_query_rewrite,
-        enable_hyde=request.enable_hyde,
-    )
+    try:
+        chunks = await search_service.search(
+            query=effective_query,
+            filters=request.filters,
+            top_k=request.top_k,
+            search_mode=request.search_mode,
+            weight_dense=request.weight_dense,
+            weight_sparse=request.weight_sparse,
+            enable_reranker=request.enable_reranker,
+            enable_query_rewrite=request.enable_query_rewrite,
+            enable_hyde=request.enable_hyde,
+        )
+    finally:
+        await db.close()
 
     stage_latencies = search_service.last_stage_latencies
     top_reranker_score: float | None = None
@@ -576,6 +690,8 @@ async def stream_query_rag(
 
         raw_text = "".join(accumulated_tokens)
         rag_response = generator.finalize_stream_response(raw_text, chunks, request_t0)
+        if effective_query != sanitized_query and rag_response.rewritten_query is None:
+            rag_response.rewritten_query = effective_query
 
         citations_payload = [
             {
@@ -599,6 +715,12 @@ async def stream_query_rag(
             "confidence_score": rag_response.confidence_score,
             "has_unverified": "[unverified:" in rag_response.answer,
             "latency_ms": rag_response.latency_ms,
+            "candidate_facts": [f.model_dump() for f in rag_response.candidate_facts],
+            "execution_trace": [t.model_dump() for t in rag_response.execution_trace],
+            "route": rag_response.route.value if rag_response.route else None,
+            "crag_retry_count": rag_response.crag_retry_count,
+            "sql_query_executed": rag_response.sql_query_executed,
+            "rewritten_query": rag_response.rewritten_query,
         }
         verif_msg = json.dumps({"event": "verification", "data": verification_payload})
         yield f"data: {verif_msg}\n\n"
@@ -658,6 +780,7 @@ async def stream_query_rag(
                 total_latency_ms = rag_response.latency_ms
                 log_entry = QueryLogCreate(
                     request_id=get_correlation_id() or str(uuid.uuid4()),
+                    session_id=request.session_id,
                     query_text=effective_query,
                     search_mode=request.search_mode,
                     cache_hit=False,

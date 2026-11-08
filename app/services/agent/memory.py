@@ -25,6 +25,9 @@ class ConversationMemoryService:
         re.IGNORECASE,
     )
 
+    # Local in-memory session store fallback across instances when Redis is absent
+    _local_sessions: ClassVar[dict[str, list[dict[str, Any]]]] = {}
+
     def __init__(
         self,
         redis_client: Any = None,
@@ -36,8 +39,6 @@ class ConversationMemoryService:
         self.llm_provider = llm_provider
         self.max_turns = max_turns
         self.ttl = ttl
-        # Local in-memory session store fallback when Redis is absent
-        self._local_sessions: dict[str, list[dict[str, Any]]] = {}
 
     def _get_key(self, session_id: str) -> str:
         return f"chat:session:{session_id}"
@@ -58,8 +59,11 @@ class ConversationMemoryService:
             "timestamp": time.time(),
         }
 
-        # In-memory fallback tracking
+        # In-memory fallback tracking with bounded capacity to prevent memory leaks
         if session_id not in self._local_sessions:
+            if len(self._local_sessions) >= 5000:
+                oldest_key = next(iter(self._local_sessions))
+                self._local_sessions.pop(oldest_key, None)
             self._local_sessions[session_id] = []
         self._local_sessions[session_id].append(turn_data)
         if len(self._local_sessions[session_id]) > self.max_turns:
@@ -125,6 +129,11 @@ class ConversationMemoryService:
                     session_id,
                     exc,
                 )
+
+    @classmethod
+    def clear_all(cls) -> None:
+        """Clear in-memory fallback sessions across all instances (useful for test resets)."""
+        cls._local_sessions.clear()
 
     def _needs_contextualization(self, query: str) -> bool:
         """Check if query contains ambiguous pronouns or elliptical follow-ups."""

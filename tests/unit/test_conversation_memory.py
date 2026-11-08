@@ -169,3 +169,27 @@ class TestConversationMemoryService:
         assert len(history) == 2
         assert history[0]["user"] == "Q1"
         assert history[1]["assistant"] == "A2"
+
+    @pytest.mark.asyncio
+    async def test_multi_instance_fallback_persistence(self) -> None:
+        """Verify memory persists across separate instances when Redis is absent."""
+        session_id = "sess_multi_instance_test"
+        # Request 1: service instance 1
+        service1 = ConversationMemoryService(redis_client=None)
+        await service1.add_turn(
+            session_id,
+            "Tell me about Apple's financial health.",
+            "Apple maintains a strong balance sheet.",
+        )
+
+        # Request 2: new service instance 2 (mimicking FastAPI dependency injection)
+        service2 = ConversationMemoryService(redis_client=None)
+        history = await service2.get_history(session_id)
+        assert len(history) == 1
+        assert history[0]["user"] == "Tell me about Apple's financial health."
+
+        # Pronoun "its" should be resolved using persisted memory
+        contextualized = await service2.contextualize_query(
+            session_id, "What was its revenue in 2023?"
+        )
+        assert "Apple's revenue in 2023?" in contextualized

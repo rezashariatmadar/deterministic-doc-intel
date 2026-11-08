@@ -44,6 +44,7 @@ class SafeSQLTool:
         self.llm_provider = llm_provider
         self.timeout_ms = timeout_ms
         self.max_correction_retries = max_correction_retries
+        self.last_executed_sql: str | None = None
 
     def _check_balanced_tokens(self, sql: str) -> None:
         """AST check: verify balanced parentheses and quotes to prevent injection escapes."""
@@ -143,15 +144,34 @@ class SafeSQLTool:
                 query=cleaned,
             )
 
-        # Verify all FROM and JOIN table targets are financial_metrics or subqueries
+        # Extract any CTE aliases defined in WITH clauses (including optional column lists)
+        cte_aliases = {
+            m.lower()
+            for m in re.findall(
+                r"\b([a-zA-Z_][a-zA-Z0-9_]*)(?:\s*\([^)]*\))?\s+AS\s*\(",
+                cleaned,
+                re.IGNORECASE,
+            )
+        }
+        allowed_targets = (
+            {"financial_metrics", "public.financial_metrics"}
+            | cte_aliases
+            | {f"public.{a}" for a in cte_aliases}
+        )
+
+        # Verify all FROM and JOIN table targets are financial_metrics, CTE aliases, or subqueries
         targets = re.findall(r"\b(?:FROM|JOIN)\s+([a-zA-Z0-9_.\'\"]+)", cleaned, re.IGNORECASE)
         for target in targets:
             clean_target = target.strip("'\"").lower()
-            if clean_target != "financial_metrics" and not clean_target.startswith("("):
+            if clean_target not in allowed_targets and not clean_target.startswith("("):
                 raise SafeSQLError(
                     f"Queries are restricted to 'financial_metrics', forbidden target: '{target}'",
                     query=cleaned,
                 )
+
+        # Enforce maximum result limit
+        if not re.search(r"\bLIMIT\s+\d+", cleaned, re.IGNORECASE):
+            cleaned = f"{cleaned} LIMIT 50"
 
         return cleaned
 
@@ -262,6 +282,8 @@ class SafeSQLTool:
                 )
                 columns = list(result.keys())
                 rows = [list(r) for r in result.fetchall()]
+                self.last_executed_sql = current_sql
+                await session.rollback()
                 return columns, rows
             except Exception as exc:
                 # CRITICAL Trap 3: Always rollback to prevent poisoning the async session

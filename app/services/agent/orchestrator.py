@@ -54,6 +54,7 @@ class AgentState(BaseModel):
     external_chunks: list[RetrievedChunk] = Field(default_factory=list)
     candidate_facts: list[CandidateFact] = Field(default_factory=list)
     execution_trace: list[AgentTraceStep] = Field(default_factory=list)
+    sql_query_executed: str | None = None
     response: RAGResponse | None = None
     error: str | None = None
 
@@ -179,6 +180,9 @@ class AgentOrchestrator:
             candidate_facts=[],
             execution_trace=state.execution_trace,
             crag_retry_count=state.crag_retries,
+            crag_retries=state.crag_retries,
+            sql_query_executed=state.sql_query_executed,
+            rewritten_query=state.query if state.query != state.original_query else None,
         )
         return "END"
 
@@ -187,9 +191,13 @@ class AgentOrchestrator:
         start = time.perf_counter()
         try:
             sql_query = await self.sql_tool.generate_sql(state.query)
+            state.sql_query_executed = sql_query
             cols, rows = await self.sql_tool.execute_query(self.db, sql_query)
+            if getattr(self.sql_tool, "last_executed_sql", None):
+                state.sql_query_executed = self.sql_tool.last_executed_sql
+            executed_sql = state.sql_query_executed or sql_query
             sql_chunk = self.sql_tool.format_as_chunk(
-                cols, rows, sql_query, source_id=len(state.sql_chunks) + 1
+                cols, rows, executed_sql, source_id=len(state.sql_chunks) + 1
             )
             state.sql_chunks.append(sql_chunk)
 
@@ -231,6 +239,7 @@ class AgentOrchestrator:
             weight_dense=state.weight_dense,
             weight_sparse=state.weight_sparse,
             enable_reranker=state.enable_reranker,
+            enable_query_rewrite=(state.route == IntentRoute.MULTI_HOP_AGENTIC_RAG),
         )
         state.retrieved_chunks = chunks
 
@@ -389,6 +398,10 @@ class AgentOrchestrator:
         rag_response.execution_trace = state.execution_trace
         rag_response.route = state.route
         rag_response.crag_retry_count = state.crag_retries
+        rag_response.crag_retries = state.crag_retries
+        rag_response.sql_query_executed = state.sql_query_executed
+        if state.query != state.original_query:
+            rag_response.rewritten_query = state.query
         state.response = rag_response
 
         return "END"

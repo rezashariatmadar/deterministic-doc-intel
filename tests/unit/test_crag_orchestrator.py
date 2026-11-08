@@ -204,6 +204,8 @@ class TestAgentOrchestratorStateMachine:
             response = await orchestrator.run(state)
             assert response.is_answerable is True
             assert response.route == IntentRoute.STRUCTURED_SQL_ANALYTICS
+            assert response.sql_query_executed is not None
+            assert "financial_metrics" in response.sql_query_executed
             # Trace should contain sql_node and generate_node
             steps = [t.step for t in response.execution_trace]
             assert "sql_node" in steps
@@ -246,6 +248,8 @@ class TestAgentOrchestratorStateMachine:
 
             # Verified Trap 2: retried 2 times
             assert response.crag_retry_count == 2
+            assert response.rewritten_query is not None
+            assert response.rewritten_query != "obscure term not found"
             # Verified Trap 8: filters relaxed on retry #2
             assert state.filters is not None
             assert state.filters.element_types is None
@@ -286,3 +290,28 @@ class TestAgentOrchestratorStateMachine:
             assert "external_search_node" in steps
             assert len(state.external_chunks) > 0
             assert state.external_chunks[0].source_type == CitationSourceType.EXTERNAL_WEB
+
+    @pytest.mark.asyncio
+    async def test_multi_hop_enables_query_rewrite(self) -> None:
+        """Verify retrieve_node sets enable_query_rewrite=True for MULTI_HOP_AGENTIC_RAG."""
+        async with async_session_maker() as session:
+            mock_llm = MockAgentLLM()
+            mock_llm.generate_mock.return_value = "Multi-hop answer [1]."
+            orchestrator = AgentOrchestrator(
+                db=session,
+                embedding_provider=MockAgentEmbedding(),
+                llm_provider=mock_llm,
+            )
+            orchestrator.vector_search.search = AsyncMock(  # type: ignore[method-assign]
+                return_value=[make_chunk(text="Relevant evidence chunk", similarity=0.9)]
+            )
+
+            state = AgentState(
+                query="Compare revenue and profit across years",
+                original_query="Compare revenue and profit across years",
+                route_override=IntentRoute.MULTI_HOP_AGENTIC_RAG,
+            )
+            response = await orchestrator.run(state)
+            assert response.route == IntentRoute.MULTI_HOP_AGENTIC_RAG
+            call_kwargs = orchestrator.vector_search.search.call_args.kwargs
+            assert call_kwargs.get("enable_query_rewrite") is True

@@ -49,13 +49,67 @@ class TestSafeSQLToolValidation:
             "FROM financial_metrics WHERE fiscal_year = 2023"
         )
         cleaned = tool.validate_sql(valid_query)
-        assert cleaned == valid_query
+        assert cleaned == f"{valid_query} LIMIT 50"
 
     def test_valid_select_with_trailing_semicolon_and_spaces(self, tool: SafeSQLTool) -> None:
         query = "SELECT company, metric_name FROM financial_metrics WHERE fiscal_year = 2023  ;  "
         cleaned = tool.validate_sql(query)
-        expected = "SELECT company, metric_name FROM financial_metrics WHERE fiscal_year = 2023"
+        expected = (
+            "SELECT company, metric_name FROM financial_metrics WHERE fiscal_year = 2023 LIMIT 50"
+        )
         assert cleaned == expected
+
+    def test_valid_select_preserves_existing_limit(self, tool: SafeSQLTool) -> None:
+        query = (
+            "SELECT company, metric_name FROM financial_metrics WHERE fiscal_year = 2023 LIMIT 10"
+        )
+        cleaned = tool.validate_sql(query)
+        assert cleaned == query
+
+    def test_cte_query_allowed(self, tool: SafeSQLTool) -> None:
+        cte_query = (
+            "WITH apple_rev AS ("
+            "SELECT company, metric_value FROM financial_metrics WHERE company = 'Apple'"
+            ") SELECT company, metric_value FROM apple_rev LIMIT 5"
+        )
+        cleaned = tool.validate_sql(cte_query)
+        assert cleaned == cte_query
+
+    def test_cte_query_auto_limit(self, tool: SafeSQLTool) -> None:
+        cte_query = (
+            "WITH apple_metrics AS ("
+            "SELECT * FROM financial_metrics WHERE company = 'Apple'"
+            ") SELECT * FROM apple_metrics"
+        )
+        cleaned = tool.validate_sql(cte_query)
+        assert cleaned == f"{cte_query} LIMIT 50"
+
+    def test_cte_query_with_column_list(self, tool: SafeSQLTool) -> None:
+        cte_query = (
+            "WITH apple_metrics (company, metric_value) AS ("
+            "SELECT company, metric_value FROM financial_metrics WHERE company = 'Apple'"
+            ") SELECT company, metric_value FROM apple_metrics"
+        )
+        cleaned = tool.validate_sql(cte_query)
+        assert cleaned == f"{cte_query} LIMIT 50"
+
+    def test_public_schema_table_allowed(self, tool: SafeSQLTool) -> None:
+        query = (
+            "SELECT company, metric_value FROM public.financial_metrics WHERE fiscal_year = 2023"
+        )
+        cleaned = tool.validate_sql(query)
+        assert cleaned == f"{query} LIMIT 50"
+
+    def test_multiple_ctes_allowed(self, tool: SafeSQLTool) -> None:
+        query = (
+            "WITH cte1 AS ("
+            "SELECT company, metric_value FROM financial_metrics WHERE company = 'Apple'"
+            "), cte2 (company, metric_value) AS ("
+            "SELECT company, metric_value FROM financial_metrics WHERE company = 'NVIDIA'"
+            ") SELECT * FROM cte1 UNION ALL SELECT * FROM cte2"
+        )
+        cleaned = tool.validate_sql(query)
+        assert cleaned == f"{query} LIMIT 50"
 
     @pytest.mark.parametrize(
         "malicious_sql",
@@ -113,6 +167,7 @@ class TestSafeSQLToolExecution:
             cols, rows = await tool.execute_query(session, sql_nvda)
             assert len(rows) == 1
             assert rows[0][0] == 29760.0
+            assert tool.last_executed_sql == f"{sql_nvda} LIMIT 50"
 
     @pytest.mark.asyncio
     async def test_session_rollback_on_execution_error(self) -> None:

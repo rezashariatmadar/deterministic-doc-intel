@@ -46,16 +46,20 @@ class DummyAgentLLMProvider(LLMProvider):
         temperature: float = 0.0,
     ) -> str:
         prompt_lower = prompt.lower()
+        if "classify" in prompt_lower or "intent route" in prompt_lower:
+            return '{"route": "STRUCTURED_SQL_ANALYTICS", "confidence": 0.95, "reasoning": "SQL"}'
+        if "coreference" in prompt_lower or "follow-up query" in prompt_lower:
+            return "What was Apple's total revenue in fiscal year 2023?"
         if "text-to-sql" in prompt_lower or "financial_metrics" in prompt_lower:
             return (
                 "SELECT company, fiscal_year, metric_name, metric_value "
                 "FROM financial_metrics "
                 "WHERE company = 'Apple' AND fiscal_year = 2023 AND metric_name = 'revenue'"
             )
-        if "coreference" in prompt_lower or "follow-up query" in prompt_lower:
-            return "What was Apple's total revenue in fiscal year 2023?"
         if "reformulate" in prompt_lower:
             return "Apple Inc. total consolidated revenue fiscal year 2023"
+        if "<source id=" not in prompt:
+            return "In fiscal year 2023, Apple reported total revenue of $383,285 million."
         return "In fiscal year 2023, Apple reported total revenue of $383,285 million [1]."
 
     async def generate_stream(
@@ -145,6 +149,7 @@ async def test_multi_turn_conversational_memory(agent_api_client: AsyncClient) -
     data2 = resp2.json()
     assert data2["is_answerable"] is True
     assert "answer" in data2
+    assert data2.get("rewritten_query") == "What was Apple's total revenue in fiscal year 2023?"
 
 
 @pytest.mark.asyncio
@@ -161,6 +166,8 @@ async def test_safe_text_to_sql_analytics_pipeline(agent_api_client: AsyncClient
     data = response.json()
     assert data["route"] == IntentRoute.STRUCTURED_SQL_ANALYTICS.value
     assert data["is_answerable"] is True
+    assert data.get("sql_query_executed") is not None
+    assert "financial_metrics" in data["sql_query_executed"]
     assert len(data["execution_trace"]) >= 2
 
     # Verify citation source_type segregation (Trap 4)
@@ -208,10 +215,12 @@ async def test_pii_redaction_in_query_pipeline(agent_api_client: AsyncClient) ->
 @pytest.mark.asyncio
 async def test_streaming_agentic_pipeline(agent_api_client: AsyncClient) -> None:
     """Streaming endpoint emits SSE events for multi-agent execution."""
+    session_id = "test_agent_stream_sess_telemetry"
     response = await agent_api_client.post(
         "/api/v1/query/stream",
         json={
             "query": "Query the database table for Apple revenue in fiscal year 2023",
+            "session_id": session_id,
             "enable_agent": True,
         },
     )
@@ -222,4 +231,110 @@ async def test_streaming_agentic_pipeline(agent_api_client: AsyncClient) -> None
     assert '"event": "sources"' in content
     assert '"event": "token"' in content
     assert '"event": "verification"' in content
+    assert '"sql_query_executed"' in content
+    assert '"rewritten_query"' in content
     assert "[DONE]" in content
+
+    # Verify query telemetry log was recorded with session_id and positive latency
+    from sqlalchemy import text
+
+    from app.db.session import async_session_maker
+
+    async with async_session_maker() as session:
+        log_res = await session.execute(
+            text(
+                "SELECT session_id, total_latency_ms FROM query_logs "
+                f"WHERE session_id = '{session_id}' ORDER BY created_at DESC LIMIT 1"
+            )
+        )
+        row = log_res.fetchone()
+        assert row is not None
+        assert row[0] == session_id
+        assert row[1] is not None and row[1] > 0
+
+
+@pytest.mark.asyncio
+async def test_streaming_standard_pipeline_verification_fields(
+    agent_api_client: AsyncClient,
+) -> None:
+    """Standard streaming endpoint emits verification event with complete schema fields."""
+    response = await agent_api_client.post(
+        "/api/v1/query/stream",
+        json={
+            "query": "Tell me about Apple's products in fiscal year 2023",
+            "session_id": "test_standard_stream_sess",
+            "enable_agent": False,
+        },
+    )
+    assert response.status_code == 200
+    content = response.text
+    assert '"event": "verification"' in content
+    assert '"sql_query_executed"' in content
+    assert '"rewritten_query"' in content
+    assert '"candidate_facts"' in content
+    assert '"execution_trace"' in content
+
+
+@pytest.mark.asyncio
+async def test_seeded_metrics_accessible() -> None:
+    """Verify newly seeded financial metrics (R&D expense, total assets, etc.) are in DB."""
+    from sqlalchemy import text
+
+    from app.db.session import async_session_maker
+
+    async with async_session_maker() as session:
+        # Check Apple FY23 rd_expense
+        res_rd = await session.execute(
+            text(
+                "SELECT metric_value FROM financial_metrics "
+                "WHERE company = 'Apple' AND fiscal_year = 2023 AND metric_name = 'rd_expense'"
+            )
+        )
+        assert res_rd.scalar() == 29915.0
+
+        # Check Apple FY23 total_assets
+        res_assets = await session.execute(
+            text(
+                "SELECT metric_value FROM financial_metrics "
+                "WHERE company = 'Apple' AND fiscal_year = 2023 AND metric_name = 'total_assets'"
+            )
+        )
+        assert res_assets.scalar() == 352583.0
+
+        # Check Apple FY23 total_current_assets
+        res_ca = await session.execute(
+            text(
+                "SELECT metric_value FROM financial_metrics "
+                "WHERE company = 'Apple' AND fiscal_year = 2023 "
+                "AND metric_name = 'total_current_assets'"
+            )
+        )
+        assert res_ca.scalar() == 143566.0
+
+        # Check Apple FY23 commercial_paper
+        res_cp = await session.execute(
+            text(
+                "SELECT metric_value FROM financial_metrics "
+                "WHERE company = 'Apple' AND fiscal_year = 2023 "
+                "AND metric_name = 'commercial_paper'"
+            )
+        )
+        assert res_cp.scalar() == 5985.0
+
+        # Check Apple FY23 term_debt
+        res_td = await session.execute(
+            text(
+                "SELECT metric_value FROM financial_metrics "
+                "WHERE company = 'Apple' AND fiscal_year = 2023 AND metric_name = 'term_debt'"
+            )
+        )
+        assert res_td.scalar() == 95281.0
+
+        # Check NVIDIA FY24 rd_expense
+        res_nv_rd = await session.execute(
+            text(
+                "SELECT metric_value FROM financial_metrics "
+                "WHERE company = 'NVIDIA' AND fiscal_year = 2024 AND metric_name = 'rd_expense'"
+            )
+        )
+        assert res_nv_rd.scalar() == 8675.0
