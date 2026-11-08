@@ -188,6 +188,14 @@ class QueryRequest(BaseModel):
         default=None,
         description="Optional manual override for intent router",
     )
+    resolve_parents: bool = Field(
+        default=True,
+        description="Whether to resolve child chunks to larger parent chunks for context expansion",
+    )
+    bypass_cache: bool = Field(
+        default=False,
+        description="Whether to bypass semantic cache lookup and execute a fresh query",
+    )
 
     def model_post_init(self, __context: Any) -> None:
         if self.enable_agentic and not self.enable_agent:
@@ -209,6 +217,8 @@ class Citation(BaseModel):
     quote: str | None = None
     bbox: dict[str, Any] | None = None
     source_type: CitationSourceType = CitationSourceType.DOCUMENT
+    match_tier: str | None = None
+    rehomed_from: int | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     def model_post_init(self, __context: Any) -> None:
@@ -261,6 +271,10 @@ class RAGResponse(BaseModel):
     crag_retry_count: int = Field(
         default=0,
         description="Number of CRAG query reformulation retries executed",
+    )
+    stage_latencies: dict[str, float] | None = Field(
+        default=None,
+        description="Latency breakdown by retrieval and processing stages in milliseconds",
     )
 
     def model_post_init(self, __context: Any) -> None:

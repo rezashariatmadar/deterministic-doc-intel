@@ -51,6 +51,9 @@ class TelemetryRepository:
         self, start_time: datetime | None = None
     ) -> MetricsSummaryResponse:
         """Compute aggregated latency percentiles, hit ratios, and stage latency metrics."""
+        non_cache_non_agent = (QueryLog.cache_hit.is_(False)) & (
+            QueryLog.dense_search_ms + QueryLog.sparse_search_ms > 0
+        )
         stmt = select(
             func.count(QueryLog.id),
             func.count(case((QueryLog.cache_hit.is_(True), 1))),
@@ -59,11 +62,11 @@ class TelemetryRepository:
             func.coalesce(func.percentile_cont(0.50).within_group(QueryLog.total_latency_ms), 0.0),
             func.coalesce(func.percentile_cont(0.95).within_group(QueryLog.total_latency_ms), 0.0),
             func.coalesce(func.percentile_cont(0.99).within_group(QueryLog.total_latency_ms), 0.0),
-            func.coalesce(func.avg(QueryLog.rewrite_ms), 0.0),
-            func.coalesce(func.avg(QueryLog.dense_search_ms), 0.0),
-            func.coalesce(func.avg(QueryLog.sparse_search_ms), 0.0),
-            func.coalesce(func.avg(QueryLog.rerank_ms), 0.0),
-            func.avg(QueryLog.llm_ttft_ms),
+            func.coalesce(func.avg(case((non_cache_non_agent, QueryLog.rewrite_ms))), 0.0),
+            func.coalesce(func.avg(case((non_cache_non_agent, QueryLog.dense_search_ms))), 0.0),
+            func.coalesce(func.avg(case((non_cache_non_agent, QueryLog.sparse_search_ms))), 0.0),
+            func.coalesce(func.avg(case((non_cache_non_agent, QueryLog.rerank_ms))), 0.0),
+            func.avg(case((non_cache_non_agent, QueryLog.llm_ttft_ms))),
         )
 
         if start_time is not None:

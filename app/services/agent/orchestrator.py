@@ -43,6 +43,7 @@ class AgentState(BaseModel):
     weight_dense: float | None = None
     weight_sparse: float | None = None
     enable_reranker: bool | None = None
+    resolve_parents: bool = True
     allow_external_fallback: bool = False
     route: IntentRoute | None = None
     route_override: IntentRoute | None = None
@@ -240,6 +241,7 @@ class AgentOrchestrator:
             weight_sparse=state.weight_sparse,
             enable_reranker=state.enable_reranker,
             enable_query_rewrite=(state.route == IntentRoute.MULTI_HOP_AGENTIC_RAG),
+            resolve_parents=state.resolve_parents,
         )
         state.retrieved_chunks = chunks
 
@@ -397,6 +399,7 @@ class AgentOrchestrator:
         rag_response.candidate_facts = candidate_facts
         rag_response.execution_trace = state.execution_trace
         rag_response.route = state.route
+        rag_response.stage_latencies = self.vector_search.last_stage_latencies
         rag_response.crag_retry_count = state.crag_retries
         rag_response.crag_retries = state.crag_retries
         rag_response.sql_query_executed = state.sql_query_executed

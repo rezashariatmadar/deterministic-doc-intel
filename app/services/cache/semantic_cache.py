@@ -45,10 +45,21 @@ class SemanticCacheService:
         filters: dict[str, Any] | QueryFilters | None = None,
         top_k: int = 5,
         enable_reranker: bool | None = None,
+        resolve_parents: bool | None = None,
+        enable_agent: bool | None = None,
+        route_override: str | None = None,
+        enable_query_rewrite: bool | None = None,
+        enable_hyde: bool | None = None,
+        allow_external_fallback: bool | None = None,
+        max_crag_retries: int | None = None,
+        weight_dense: float | None = None,
+        weight_sparse: float | None = None,
     ) -> str:
         """
         Produce a deterministic SHA-256 hex digest of sorted canonical filters, search mode,
-        top_k, and enable_reranker parameters.
+        top_k, enable_reranker, and execution options (enable_agent, route_override,
+        enable_query_rewrite, enable_hyde, allow_external_fallback, max_crag_retries,
+        weight_dense, weight_sparse, resolve_parents).
         """
         if filters is None:
             raw_filters: dict[str, Any] = {}
@@ -59,12 +70,33 @@ class SemanticCacheService:
         else:
             raw_filters = {}
 
-        payload = {
+        payload: dict[str, Any] = {
             "search_mode": search_mode,
             "filters": raw_filters,
             "top_k": top_k,
             "enable_reranker": enable_reranker,
         }
+        if resolve_parents is not None:
+            payload["resolve_parents"] = resolve_parents
+        if enable_agent is not None:
+            payload["enable_agent"] = enable_agent
+        if route_override is not None:
+            payload["route_override"] = (
+                route_override.value if hasattr(route_override, "value") else str(route_override)
+            )
+        if enable_query_rewrite is not None:
+            payload["enable_query_rewrite"] = enable_query_rewrite
+        if enable_hyde is not None:
+            payload["enable_hyde"] = enable_hyde
+        if allow_external_fallback is not None:
+            payload["allow_external_fallback"] = allow_external_fallback
+        if max_crag_retries is not None:
+            payload["max_crag_retries"] = max_crag_retries
+        if weight_dense is not None:
+            payload["weight_dense"] = weight_dense
+        if weight_sparse is not None:
+            payload["weight_sparse"] = weight_sparse
+
         serialized = json.dumps(payload, sort_keys=True, default=str)
         return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 

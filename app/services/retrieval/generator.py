@@ -192,6 +192,15 @@ class GroundedGenerator:
                                 quote=res.verified_quote,
                                 bbox=chunk.bbox,
                                 source_type=chunk.source_type,
+                                match_tier=res.match_tier,
+                                rehomed_from=(
+                                    orig_source_id
+                                    if (
+                                        res.rehomed_source_id is not None
+                                        and res.rehomed_source_id != orig_source_id
+                                    )
+                                    else None
+                                ),
                                 metadata=chunk.metadata,
                             )
                         )

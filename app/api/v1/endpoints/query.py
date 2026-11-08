@@ -45,6 +45,31 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _compute_scope_hash(
+    semantic_cache: SemanticCacheService,
+    request: QueryRequest,
+) -> str:
+    """Compute canonical scope hash including all query options for semantic caching."""
+    route_override_val = (
+        str(request.route_override.value) if request.route_override is not None else None
+    )
+    return semantic_cache.canonical_scope_hash(
+        search_mode=request.search_mode,
+        filters=request.filters,
+        top_k=request.top_k,
+        enable_reranker=request.enable_reranker,
+        resolve_parents=request.resolve_parents,
+        enable_agent=request.enable_agent,
+        route_override=route_override_val,
+        enable_query_rewrite=request.enable_query_rewrite,
+        enable_hyde=request.enable_hyde,
+        allow_external_fallback=request.allow_external_fallback,
+        max_crag_retries=request.max_crag_retries,
+        weight_dense=request.weight_dense,
+        weight_sparse=request.weight_sparse,
+    )
+
+
 @router.post("/query", response_model=RAGResponse)
 async def query_rag(
     request: QueryRequest,
@@ -87,14 +112,9 @@ async def query_rag(
     scope_hash: str | None = None
 
     # 4. Semantic cache lookup using contextualized query
-    if semantic_cache is not None:
+    if semantic_cache is not None and not request.bypass_cache:
         try:
-            scope_hash = semantic_cache.canonical_scope_hash(
-                search_mode=request.search_mode,
-                filters=request.filters,
-                top_k=request.top_k,
-                enable_reranker=request.enable_reranker,
-            )
+            scope_hash = _compute_scope_hash(semantic_cache, request)
             query_vector = await embedding_provider.embed_query(effective_query)
             cached_response, _similarity = await semantic_cache.lookup(
                 query_vector=query_vector,
@@ -175,6 +195,7 @@ async def query_rag(
             weight_dense=request.weight_dense,
             weight_sparse=request.weight_sparse,
             enable_reranker=request.enable_reranker,
+            resolve_parents=request.resolve_parents,
             allow_external_fallback=request.allow_external_fallback,
             route_override=request.route_override,
             max_crag_retries=request.max_crag_retries,
@@ -199,10 +220,12 @@ async def query_rag(
             enable_reranker=request.enable_reranker,
             enable_query_rewrite=request.enable_query_rewrite,
             enable_hyde=request.enable_hyde,
+            resolve_parents=request.resolve_parents,
         )
         generator = GroundedGenerator(llm_provider=llm_provider)
         rag_response = await generator.generate(query=effective_query, chunks=chunks)
         stage_latencies = search_service.last_stage_latencies
+        rag_response.stage_latencies = stage_latencies
 
     total_latency_ms = (time.perf_counter() - start_time) * 1000.0
     rag_response.latency_ms = round(total_latency_ms, 2)
@@ -222,12 +245,7 @@ async def query_rag(
     if semantic_cache is not None:
         try:
             if scope_hash is None:
-                scope_hash = semantic_cache.canonical_scope_hash(
-                    search_mode=request.search_mode,
-                    filters=request.filters,
-                    top_k=request.top_k,
-                    enable_reranker=request.enable_reranker,
-                )
+                scope_hash = _compute_scope_hash(semantic_cache, request)
             if query_vector is None:
                 query_vector = await embedding_provider.embed_query(effective_query)
             background_tasks.add_task(
@@ -330,14 +348,9 @@ async def stream_query_rag(
     scope_hash: str | None = None
     query_vector: list[float] | None = None
 
-    if semantic_cache is not None:
+    if semantic_cache is not None and not request.bypass_cache:
         try:
-            scope_hash = semantic_cache.canonical_scope_hash(
-                search_mode=request.search_mode,
-                filters=request.filters,
-                top_k=request.top_k,
-                enable_reranker=request.enable_reranker,
-            )
+            scope_hash = _compute_scope_hash(semantic_cache, request)
             query_vector = await embedding_provider.embed_query(effective_query)
             cached_response, _similarity = await semantic_cache.lookup(
                 query_vector=query_vector,
@@ -345,6 +358,8 @@ async def stream_query_rag(
             )
             if cached_response is not None:
                 await db.close()
+                cache_hit_latency_ms = round((time.perf_counter() - request_t0) * 1000.0, 2)
+                cached_response.latency_ms = cache_hit_latency_ms
                 if effective_query != sanitized_query and cached_response.rewritten_query is None:
                     cached_response.rewritten_query = effective_query
 
@@ -377,6 +392,13 @@ async def stream_query_rag(
                             "section_path": c.section_path,
                             "supporting_quote": c.supporting_quote,
                             "bbox": c.bbox,
+                            "source_type": (
+                                c.source_type.value
+                                if hasattr(c.source_type, "value")
+                                else c.source_type
+                            ),
+                            "match_tier": c.match_tier,
+                            "rehomed_from": c.rehomed_from,
                             "metadata": c.metadata,
                         }
                         for c in cached_response.citations
@@ -385,19 +407,21 @@ async def stream_query_rag(
                         "is_answerable": cached_response.is_answerable,
                         "verified_answer": cached_response.answer,
                         "citations": citations_payload,
+                        "sources": [s.model_dump(mode="json") for s in cached_response.sources],
                         "confidence_score": cached_response.confidence_score,
                         "has_unverified": "[unverified:" in cached_response.answer,
                         "latency_ms": cached_response.latency_ms,
                         "candidate_facts": [
-                            f.model_dump() for f in cached_response.candidate_facts
+                            f.model_dump(mode="json") for f in cached_response.candidate_facts
                         ],
                         "execution_trace": [
-                            t.model_dump() for t in cached_response.execution_trace
+                            t.model_dump(mode="json") for t in cached_response.execution_trace
                         ],
                         "route": cached_response.route.value if cached_response.route else None,
                         "crag_retry_count": cached_response.crag_retry_count,
                         "sql_query_executed": cached_response.sql_query_executed,
                         "rewritten_query": cached_response.rewritten_query,
+                        "stage_latencies": cached_response.stage_latencies,
                     }
                     verif_msg = json.dumps({"event": "verification", "data": verification_payload})
                     yield f"data: {verif_msg}\n\n"
@@ -471,6 +495,7 @@ async def stream_query_rag(
             weight_dense=request.weight_dense,
             weight_sparse=request.weight_sparse,
             enable_reranker=request.enable_reranker,
+            resolve_parents=request.resolve_parents,
             allow_external_fallback=request.allow_external_fallback,
             route_override=request.route_override,
             max_crag_retries=request.max_crag_retries,
@@ -510,6 +535,11 @@ async def stream_query_rag(
                     "section_path": c.section_path,
                     "supporting_quote": c.supporting_quote,
                     "bbox": c.bbox,
+                    "source_type": (
+                        c.source_type.value if hasattr(c.source_type, "value") else c.source_type
+                    ),
+                    "match_tier": c.match_tier,
+                    "rehomed_from": c.rehomed_from,
                     "metadata": c.metadata,
                 }
                 for c in agent_response.citations
@@ -518,15 +548,21 @@ async def stream_query_rag(
                 "is_answerable": agent_response.is_answerable,
                 "verified_answer": agent_response.answer,
                 "citations": citations_payload,
+                "sources": [s.model_dump(mode="json") for s in agent_response.sources],
                 "confidence_score": agent_response.confidence_score,
                 "has_unverified": "[unverified:" in agent_response.answer,
                 "latency_ms": agent_response.latency_ms,
-                "candidate_facts": [f.model_dump() for f in agent_response.candidate_facts],
-                "execution_trace": [t.model_dump() for t in agent_response.execution_trace],
+                "candidate_facts": [
+                    f.model_dump(mode="json") for f in agent_response.candidate_facts
+                ],
+                "execution_trace": [
+                    t.model_dump(mode="json") for t in agent_response.execution_trace
+                ],
                 "route": agent_response.route.value if agent_response.route else None,
                 "crag_retry_count": agent_response.crag_retry_count,
                 "sql_query_executed": agent_response.sql_query_executed,
                 "rewritten_query": agent_response.rewritten_query,
+                "stage_latencies": agent_response.stage_latencies,
             }
             verif_msg = json.dumps({"event": "verification", "data": verification_payload})
             yield f"data: {verif_msg}\n\n"
@@ -544,12 +580,7 @@ async def stream_query_rag(
 
             if semantic_cache is not None:
                 try:
-                    sc_hash = semantic_cache.canonical_scope_hash(
-                        search_mode=request.search_mode,
-                        filters=request.filters,
-                        top_k=request.top_k,
-                        enable_reranker=request.enable_reranker,
-                    )
+                    sc_hash = _compute_scope_hash(semantic_cache, request)
                     q_vec = await embedding_provider.embed_query(effective_query)
                     await semantic_cache.store(
                         query_vector=q_vec,
@@ -652,6 +683,7 @@ async def stream_query_rag(
             enable_reranker=request.enable_reranker,
             enable_query_rewrite=request.enable_query_rewrite,
             enable_hyde=request.enable_hyde,
+            resolve_parents=request.resolve_parents,
         )
     finally:
         await db.close()
@@ -690,6 +722,7 @@ async def stream_query_rag(
 
         raw_text = "".join(accumulated_tokens)
         rag_response = generator.finalize_stream_response(raw_text, chunks, request_t0)
+        rag_response.stage_latencies = stage_latencies
         if effective_query != sanitized_query and rag_response.rewritten_query is None:
             rag_response.rewritten_query = effective_query
 
@@ -703,6 +736,11 @@ async def stream_query_rag(
                 "section_path": c.section_path,
                 "supporting_quote": c.supporting_quote,
                 "bbox": c.bbox,
+                "source_type": (
+                    c.source_type.value if hasattr(c.source_type, "value") else c.source_type
+                ),
+                "match_tier": c.match_tier,
+                "rehomed_from": c.rehomed_from,
                 "metadata": c.metadata,
             }
             for c in rag_response.citations
@@ -712,15 +750,17 @@ async def stream_query_rag(
             "is_answerable": rag_response.is_answerable,
             "verified_answer": rag_response.answer,
             "citations": citations_payload,
+            "sources": [s.model_dump(mode="json") for s in chunks],
             "confidence_score": rag_response.confidence_score,
             "has_unverified": "[unverified:" in rag_response.answer,
             "latency_ms": rag_response.latency_ms,
-            "candidate_facts": [f.model_dump() for f in rag_response.candidate_facts],
-            "execution_trace": [t.model_dump() for t in rag_response.execution_trace],
+            "candidate_facts": [f.model_dump(mode="json") for f in rag_response.candidate_facts],
+            "execution_trace": [t.model_dump(mode="json") for t in rag_response.execution_trace],
             "route": rag_response.route.value if rag_response.route else None,
             "crag_retry_count": rag_response.crag_retry_count,
             "sql_query_executed": rag_response.sql_query_executed,
             "rewritten_query": rag_response.rewritten_query,
+            "stage_latencies": stage_latencies,
         }
         verif_msg = json.dumps({"event": "verification", "data": verification_payload})
         yield f"data: {verif_msg}\n\n"
@@ -736,12 +776,7 @@ async def stream_query_rag(
 
         if semantic_cache is not None:
             try:
-                sc_hash = semantic_cache.canonical_scope_hash(
-                    search_mode=request.search_mode,
-                    filters=request.filters,
-                    top_k=request.top_k,
-                    enable_reranker=request.enable_reranker,
-                )
+                sc_hash = _compute_scope_hash(semantic_cache, request)
                 q_vec = await embedding_provider.embed_query(effective_query)
                 await semantic_cache.store(
                     query_vector=q_vec,

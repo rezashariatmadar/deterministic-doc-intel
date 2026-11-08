@@ -32,6 +32,9 @@ class ExternalSearchTool:
             return []
 
         chunks: list[RetrievedChunk] = []
+        headers = {
+            "User-Agent": "EnterpriseRAGBot/1.0 (https://github.com/example/rag; rag@example.com)"
+        }
 
         try:
             url = "https://en.wikipedia.org/w/api.php"
@@ -43,7 +46,7 @@ class ExternalSearchTool:
                 "srlimit": top_k,
                 "utf8": 1,
             }
-            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds, headers=headers) as client:
                 resp = await client.get(url, params=params)
                 if resp.status_code == 200:
                     data = resp.json()
@@ -94,7 +97,7 @@ class ExternalSearchTool:
                 "no_html": "1",
                 "skip_disambig": "1",
             }
-            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds, headers=headers) as client:
                 ddg_resp = await client.get(ddg_url, params=ddg_params)
                 if ddg_resp.status_code == 200:
                     ddg_data = ddg_resp.json()
@@ -127,29 +130,4 @@ class ExternalSearchTool:
         except Exception as ddg_exc:
             logger.debug("DuckDuckGo fallback search failed: %s", ddg_exc)
 
-        fallback_text = (
-            f"External Web Search Summary for '{query}': "
-            "Public records indicate relevant corporate information regarding performance, "
-            "product lines, and regulatory developments."
-        )
-        chunks.append(
-            RetrievedChunk(
-                source_id=start_source_id,
-                chunk_id=uuid.uuid4(),
-                document_id=uuid.uuid4(),
-                document_title="External Web: Public Knowledge Summary",
-                page_start=1,
-                page_end=1,
-                section_path="web_search",
-                element_type="text",
-                text=fallback_text,
-                contextualized_text=fallback_text,
-                similarity_score=0.70,
-                source_type=CitationSourceType.EXTERNAL_WEB,
-                metadata={
-                    "source_type": "external_web",
-                    "url": "https://en.wikipedia.org",
-                },
-            )
-        )
         return chunks

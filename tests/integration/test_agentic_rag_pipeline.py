@@ -205,6 +205,7 @@ async def test_pii_redaction_in_query_pipeline(agent_api_client: AsyncClient) ->
                 "My email is analyst.secret@example.com and phone is (415) 555-2671. "
                 "What was Apple revenue in 2023?"
             ),
+            "enable_agent": True,
         },
     )
     assert response.status_code == 200

@@ -52,6 +52,11 @@ Production-Grade Hybrid & Agentic RAG Engineering Roadmap.md
 # Scratch
 scratch/
 revli-tender-extraction/
+.hallmark/
+
+# Frontend Dashboard
+dashboard/node_modules/
+dashboard/dist/
 
 # IDE & OS
 .idea/
