@@ -25,6 +25,7 @@ Standard naive RAG systems fail when exposed to complex corporate documents. In 
 5. **Silent Retrieval Failures:** When corporate filings do not contain requested information, uncalibrated systems hallucinate answers instead of gracefully abstaining or falling back to external sources.
 
 ### How This Platform Solves It
+
 - **Hierarchical Parent-Child Indexing:** Ingests documents with layout awareness, indexing compact 200-token child chunks for dense/sparse search while expanding to 1,200-token parent chunks for LLM context generation.
 - **Hybrid Retrieval with Normalized RRF:** Combines `pgvector` HNSW cosine similarity and ParadeDB Okapi BM25 scores through Reciprocal Rank Fusion (RRF), scaling fused scores into $[0.0, 1.0]$.
 - **Self-Correcting Agentic State Machine (CRAG):** Features dynamic intent routing (`FAST_TRACK_HYBRID_RAG`, `STRUCTURED_SQL_ANALYTICS`, `MULTI_HOP_AGENTIC_RAG`, `HYBRID_SQL_AND_RAG`), relevance grading reflection loops, AST-validated text-to-SQL execution, and fallback to external web search.
@@ -39,66 +40,67 @@ Standard naive RAG systems fail when exposed to complex corporate documents. In 
 
 ```mermaid
 flowchart TD
-    Client([Client / API User]) -->|Multipart PDF Upload| API[FastAPI Ingestion Endpoint<br/><code>POST /api/v1/documents/upload?async_mode=true</code>]
-    API -->|Generate UUID & SHA-256| DB_Doc[(PostgreSQL: <code>documents</code><br/>Status: PENDING)]
-    API -->|Dispatch Task| CeleryBroker[(Redis Task Queue<br/>Broker)]
+    Client(["Client / API User"]) -->|Multipart PDF Upload| API["FastAPI Ingestion Endpoint<br/><code>POST /api/v1/documents/upload?async_mode=true</code>"]
+    API -->|Generate UUID & SHA-256| DB_Doc[("PostgreSQL: <code>documents</code><br/>Status: PENDING")]
+    API -->|Dispatch Task| CeleryBroker[("Redis Task Queue<br/>Broker")]
     API -->|Return 202 Accepted| Client
 
-    CeleryBroker -->|Consume Task| Worker[Celery Worker Engine<br/><code>app.workers.tasks.ingest_document</code>]
+    CeleryBroker -->|Consume Task| Worker["Celery Worker Engine<br/><code>app.workers.tasks.ingest_document</code>"]
     
-    subgraph Pipeline [6-Stage Ingestion Worker Pipeline]
-        Worker -->|Stage 1| Parser[PyMuPDF Structural Parser<br/>Extract Layout Blocks, Tables & Bounding Boxes]
-        Parser -->|Stage 2| Chunker[Hierarchical Chunker<br/>1200-tok Parent Chunks + 200-tok Child Chunks]
-        Chunker -->|Stage 3| Breadcrumb[Contextual Breadcrumb Injection<br/><code>[Document: ... | Section: ... | Page: ...]</code>]
-        Breadcrumb -->|Stage 4| BatchEmbed[Batch Cloud Embedding<br/>1024-dim Vectorization]
-        BatchEmbed -->|Stage 5| DB_Store[(PostgreSQL Storage<br/><code>document_chunks</code> table)]
-        DB_Store -->|Build HNSW Index| HNSW[pgvector HNSW Cosine Index]
-        DB_Store -->|Build BM25 Index| BM25[ParadeDB pg_search BM25 Index]
-        DB_Store -->|Stage 6| CacheInvalidate[Redis Semantic Cache<br/>Scope Invalidation via <code>semcache:doc_scope_map</code>]
+    subgraph Pipeline ["6-Stage Ingestion Worker Pipeline"]
+        Worker -->|Stage 1| Parser["PyMuPDF Structural Parser<br/>Extract Layout Blocks, Tables & Bounding Boxes"]
+        Parser -->|Stage 2| Chunker["Hierarchical Chunker<br/>1200-tok Parent Chunks + 200-tok Child Chunks"]
+        Chunker -->|Stage 3| Breadcrumb["Contextual Breadcrumb Injection<br/><code>[Document: ... | Section: ... | Page: ...]</code>"]
+        Breadcrumb -->|Stage 4| BatchEmbed["Batch Cloud Embedding<br/>1024-dim Vectorization"]
+        BatchEmbed -->|Stage 5| DB_Store[("PostgreSQL Storage<br/><code>document_chunks</code> table")]
+        DB_Store -->|Build HNSW Index| HNSW["pgvector HNSW Cosine Index"]
+        DB_Store -->|Build BM25 Index| BM25["ParadeDB pg_search BM25 Index"]
+        DB_Store -->|Stage 6| CacheInvalidate["Redis Semantic Cache<br/>Scope Invalidation via <code>semcache:doc_scope_map</code>"]
     end
 
-    CacheInvalidate -->|Update Document Status| DB_Done[(PostgreSQL: <code>documents</code><br/>Status: COMPLETED)]
+    CacheInvalidate -->|Update Document Status| DB_Done[("PostgreSQL: <code>documents</code><br/>Status: COMPLETED")]
 ```
 
 ### Diagram 2: Online Self-Correcting Agentic State Machine
 
 ```mermaid
 flowchart TD
-    Start([User Query]) --> Memory[Contextual Memory Service<br/>Multi-turn Pronoun Resolution & Session History]
-    Memory --> CacheCheck{Redis Semantic Cache<br/>Cosine Similarity >= 0.94?}
+    Start(["User Query"]) --> Memory["Contextual Memory Service<br/>Multi-turn Pronoun Resolution & Session History"]
+    Memory --> CacheCheck{"Redis Semantic Cache<br/>Cosine Similarity &ge; 0.94?"}
     
-    CacheCheck -->|Cache HIT| CacheHit[Instant Return Cached Answer<br/><code>X-Cache-Hit: true</code> | Latency < 10ms]
-    CacheCheck -->|Cache MISS| IntentRouter[Semantic Intent Router<br/>Pydantic Structured Classification]
+    CacheCheck -->|Cache HIT| CacheHit["Instant Return Cached Answer<br/><code>X-Cache-Hit: true</code> | Latency &lt; 10ms"]
+    CacheCheck -->|Cache MISS| IntentRouter["Semantic Intent Router<br/>Pydantic Structured Classification"]
 
-    IntentRouter -->|STRUCTURED_SQL_ANALYTICS| SQLValidator[Safe Text-to-SQL Tool<br/>AST Validation, Read-Only Enforced]
-    SQLValidator -->|Execute Query| SQLDb[(PostgreSQL Financial Metrics)]
-    SQLDb -->|Format Rows| FormatChunk[Format as RetrievedChunk]
+    IntentRouter -->|STRUCTURED_SQL_ANALYTICS| SQLValidator["Safe Text-to-SQL Tool<br/>AST Validation, Read-Only Enforced"]
+    SQLValidator -->|Execute Query| SQLDb[("PostgreSQL Financial Metrics")]
+    SQLDb -->|Format Rows| FormatChunk["Format as RetrievedChunk"]
 
     IntentRouter -->|FAST_TRACK_HYBRID_RAG| ParallelSearch
-    IntentRouter -->|MULTI_HOP_AGENTIC_RAG| QueryRewrite[Query Transformation & Decomposition]
+    IntentRouter -->|MULTI_HOP_AGENTIC_RAG| QueryRewrite["Query Transformation & Decomposition"]
     QueryRewrite --> ParallelSearch
 
-    subgraph SearchEngine [Two-Stage Hybrid Search & Provenance Engine]
-        ParallelSearch[Parallel Search Execution]
-        ParallelSearch --> DenseSearch[pgvector Dense Search<br/>HNSW Cosine Distance]
-        ParallelSearch --> SparseSearch[ParadeDB BM25 Lexical Search<br/>True Okapi Saturation]
-        DenseSearch & SparseSearch --> RRF[Normalized Reciprocal Rank Fusion<br/>Score Scaled to 0.0 - 1.0]
-        RRF --> SiblingResolve[Parent-Child Sibling Expansion<br/>Batch Load Full Chunks + BBoxes]
-        SiblingResolve --> Rerank[Cross-Encoder Neural Reranker<br/>Top-K Candidate Selection]
+    subgraph SearchEngine ["Two-Stage Hybrid Search & Provenance Engine"]
+        ParallelSearch["Parallel Search Execution"]
+        ParallelSearch --> DenseSearch["pgvector Dense Search<br/>HNSW Cosine Distance"]
+        ParallelSearch --> SparseSearch["ParadeDB BM25 Lexical Search<br/>True Okapi Saturation"]
+        DenseSearch --> RRF["Normalized Reciprocal Rank Fusion<br/>Score Scaled to 0.0 - 1.0"]
+        SparseSearch --> RRF
+        RRF --> SiblingResolve["Parent-Child Sibling Expansion<br/>Batch Load Full Chunks + BBoxes"]
+        SiblingResolve --> Rerank["Cross-Encoder Neural Reranker<br/>Top-K Candidate Selection"]
     end
 
-    Rerank --> CRAGJudge{CRAG Relevance Grader<br/>Are Chunks Relevant?}
+    Rerank --> CRAGJudge{"CRAG Relevance Grader<br/>Are Chunks Relevant?"}
     FormatChunk --> GroundedGen
 
-    CRAGJudge -->|RELEVANT| GroundedGen[Grounded Generator<br/>Strict XML Context & Bracketed Citations <code>[N]</code>]
-    CRAGJudge -->|AMBIGUOUS & Retries < 2| Reformulate[Query Reformulation Loop<br/>Strip Ambiguities & Re-search]
+    CRAGJudge -->|RELEVANT| GroundedGen["Grounded Generator<br/>Strict XML Context & Bracketed Citations <code>[N]</code>"]
+    CRAGJudge -->|AMBIGUOUS & Retries &lt; 2| Reformulate["Query Reformulation Loop<br/>Strip Ambiguities & Re-search"]
     Reformulate --> ParallelSearch
-    CRAGJudge -->|INCORRECT / No Corpus Evidence| WebFallback[External Web Search Fallback<br/>Wikipedia & DuckDuckGo API]
+    CRAGJudge -->|INCORRECT / No Corpus Evidence| WebFallback["External Web Search Fallback<br/>Wikipedia & DuckDuckGo API"]
     WebFallback --> GroundedGen
 
-    GroundedGen --> Verifier[6-Tier Deterministic Verifier Ladder<br/>Exact -> Normalized -> Fuzzy >=80% -> Cross-chunk -> Slicing]
-    Verifier --> Telemetry[Async Telemetry & Redis Cache Store<br/>Log QueryLog & Cache Scope Hash]
-    Telemetry --> Output([Final Grounded Answer + Verified Provenance])
+    GroundedGen --> Verifier["6-Tier Deterministic Verifier Ladder<br/>Exact &rarr; Normalized &rarr; Fuzzy &ge; 80% &rarr; Cross-chunk &rarr; Slicing"]
+    Verifier --> Telemetry["Async Telemetry & Redis Cache Store<br/>Log QueryLog & Cache Scope Hash"]
+    Telemetry --> Output(["Final Grounded Answer + Verified Provenance"])
 ```
 
 ---
@@ -118,6 +120,7 @@ The platform was quantitatively benchmarked against a curated 28-query golden ev
 | **Full Pipeline (Transform + Hybrid + Hierarchical + Rerank)** | **0.9826** | **0.9826** | **0.9826** | **0.2500** | **1.0000** | **0.9502** |
 
 *Key Findings:*
+
 - Moving from Dense-only to Hybrid RRF jumps **Recall@5 from 73.1% to 98.3% (+25.2 percentage points)** and boosts **MRR@10 from 0.3958 to 1.0000**.
 - Adding Cross-Encoder Neural Reranking maximizes **NDCG@5 to 0.9502**, pushing the most relevant evidence chunks to rank 1.
 
@@ -133,6 +136,7 @@ The platform was quantitatively benchmarked against a curated 28-query golden ev
 | **Overall Macro Average** | **28** | **1.0000** | **0.8303** | **0.9396** | **1.0000** | **1.0000** |
 
 *Key Findings:*
+
 - **Zero Hallucinated Citations:** The 6-tier verifier ladder achieved **100% Citation Precision**, eliminating ghost citations.
 - **Perfect Abstention:** Adversarial unanswerable queries achieved **100% Abstention Accuracy**, correctly signaling lack of evidence without confabulating figures.
 
@@ -143,12 +147,15 @@ The platform was quantitatively benchmarked against a curated 28-query golden ev
 The repository includes both an offline deterministic dry-run harness (used in CI/CD without API spend) and live execution scripts for testing against the 5-PDF SEC corpus:
 
 - **Dry-Run Mode (CI Gate):**
+
   ```bash
   uv run python -m evals.run_retrieval_eval --dry-run --output /tmp/ci_ablation.md
   ```
+
   Runs mock vector and lexical retrievers against ground truth fixtures in seconds to verify pipeline algorithms, scoring logic, and regression floors.
 
 - **Live Benchmark Execution (Production Verification):**
+
   ```bash
   # 1. Start containers and ingest the 5-document SEC corpus
   docker compose up -d
@@ -161,6 +168,7 @@ The repository includes both an offline deterministic dry-run harness (used in C
   # 3. Run live LLM generation & hallucination evaluation
   uv run python -m evals.run_generation_eval --output evals/reports/generation_benchmark.md
   ```
+
   *Note:* Live evaluation requires valid LLM/Embedding API credentials configured in `.env`.
 
 ---
