@@ -1,4 +1,4 @@
-# Production-Grade Hybrid & Agentic RAG Platform
+# Hybrid and Agentic RAG Platform
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg)](https://fastapi.tiangolo.com)
@@ -10,31 +10,31 @@
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![CI Gate](https://github.com/example/rag/actions/workflows/ci.yml/badge.svg)](.github/workflows/ci.yml)
 
-An enterprise-ready, benchmarked **Hybrid & Agentic Retrieval-Augmented Generation (RAG)** platform engineered for high-stakes corporate and financial document intelligence (SEC 10-K filings, technical specifications, and tabular metrics).
+A hybrid and agentic retrieval-augmented generation (RAG) platform for financial and technical documents, including SEC 10-K filings, technical specifications, and structured tables.
 
 ---
 
-## 1. Executive Summary & Problem Statement
+## 1. Problem statement and architecture
 
-Standard naive RAG systems fail when exposed to complex corporate documents. In production environments, enterprise knowledge bases present several structural failure modes:
+Standard fixed-chunk RAG pipelines often break on corporate filings:
 
-1. **Lost Hierarchy & Fragmented Tables:** Fixed-size chunking slices tabular financial data across boundaries, separating column headers from quantitative cell values and producing distorted answers.
-2. **Context Dilution vs. Retrieval Precision:** Small chunks (150–250 tokens) provide high embedding cosine similarity but lack sufficient context for generation; large chunks (1,000+ tokens) pollute LLM attention windows with irrelevant noise.
-3. **Hallucinated Citations & Fabricated Quotes:** Naive models invent bracketed citations `[1]` or attribute claims to wrong sources, destroying provenance and auditable trust.
-4. **Structured Data Ambiguity:** Numerical aggregations (e.g., *"Compare FY2023 revenue growth between Apple and NVIDIA"*) require deterministic SQL aggregation over database rows, which semantic vector search cannot reliably compute.
-5. **Silent Retrieval Failures:** When corporate filings do not contain requested information, uncalibrated systems hallucinate answers instead of gracefully abstaining or falling back to external sources.
+1. Fixed-size chunking splits tables across chunks, separating column headers from values and corrupting calculations.
+2. Chunks between 150 and 250 tokens match queries well in vector search but lack enough context for generation. Chunks over 1,000 tokens add irrelevant text to the attention window.
+3. Language models invent citations `[1]` or attribute claims to the wrong passage.
+4. Quantitative questions (such as comparing year-over-year revenue across companies) require exact SQL aggregations over database rows, which vector search cannot calculate reliably.
+5. Missing information causes the model to fabricate answers instead of abstaining or searching externally.
 
-### How This Platform Solves It
+### System approach
 
-- **Hierarchical Parent-Child Indexing:** Ingests documents with layout awareness, indexing compact 200-token child chunks for dense/sparse search while expanding to 1,200-token parent chunks for LLM context generation.
-- **Hybrid Retrieval with Normalized RRF:** Combines `pgvector` HNSW cosine similarity and ParadeDB Okapi BM25 scores through Reciprocal Rank Fusion (RRF), scaling fused scores into $[0.0, 1.0]$.
-- **Self-Correcting Agentic State Machine (CRAG):** Features dynamic intent routing (`FAST_TRACK_HYBRID_RAG`, `STRUCTURED_SQL_ANALYTICS`, `MULTI_HOP_AGENTIC_RAG`, `HYBRID_SQL_AND_RAG`), relevance grading reflection loops, AST-validated text-to-SQL execution, and fallback to external web search.
-- **6-Tier Deterministic Verifier Ladder:** Validates every generated assertion against source text via exact, normalized, bounded fuzzy ($\ge 80\%$), cross-chunk re-homing, and haystack slicing algorithms, guaranteeing strict provenance with bounding-box coordinates (`[x0, y0, x1, y1]`).
-- **Full-Lifecycle Observability & Farsi RTL Dashboard:** An interactive developer workbench with step-by-step agent execution traces, evidence inspector, real-time SSE streaming, and sub-millisecond Redis semantic caching.
+- Hierarchical indexing: extracts layout blocks, stores compact 200-token child chunks for dense and sparse search, and maps each child to a 1,200-token parent chunk for LLM generation context.
+- Hybrid search with normalized RRF: combines `pgvector` HNSW cosine similarity and ParadeDB BM25 rankings, scaled to $[0.0, 1.0]$.
+- Agentic routing: directs queries across fast-track retrieval, text-to-SQL with AST validation, multi-hop decomposition, and web search fallback, with reflection loops to filter out irrelevant chunks.
+- Deterministic quote verifier: checks every citation against source text using exact match, normalized offsets, token fuzzy matching ($\ge 80\%$), cross-chunk re-homing, and text slicing, then attaches bounding boxes (`[x0, y0, x1, y1]`) to verified citations.
+- Observability dashboard: includes step-by-step trace views, an evidence inspector with PDF bounding boxes, SSE streaming, and Redis semantic caching.
 
 ---
 
-## 2. System Architecture Diagrams
+## 2. System diagrams
 
 ### Diagram 1: Asynchronous Celery Ingestion & Hierarchical Indexing Pipeline
 
@@ -105,11 +105,11 @@ flowchart TD
 
 ---
 
-## 3. Quantitative Benchmark Tables
+## 3. Benchmark results
 
-The platform was quantitatively benchmarked against a curated 28-query golden evaluation dataset across SEC 10-K filings (NVIDIA, Apple, Microsoft, Amazon, Alphabet) evaluating dense, sparse, hybrid, hierarchical reranking, and generation faithfulness.
+A 28-query benchmark on SEC 10-K filings (NVIDIA, Apple, Microsoft, Amazon, and Alphabet) evaluated dense, sparse, hybrid, and hierarchical retrieval alongside generation faithfulness.
 
-### Table 1: Retrieval Ablation Benchmark (`evals/reports/retrieval_ablation.md`)
+### Table 1: Retrieval ablation (`evals/reports/retrieval_ablation.md`)
 
 | Retrieval Configuration | Recall@3 | Recall@5 | Recall@10 | Precision@5 | MRR@10 | NDCG@5 |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -119,12 +119,9 @@ The platform was quantitatively benchmarked against a curated 28-query golden ev
 | **Hybrid + Hierarchical + Reranker** | **0.9826** | **0.9826** | **0.9826** | **0.2500** | **1.0000** | 0.9459 |
 | **Full Pipeline (Transform + Hybrid + Hierarchical + Rerank)** | **0.9826** | **0.9826** | **0.9826** | **0.2500** | **1.0000** | **0.9502** |
 
-*Key Findings:*
+Combining dense and sparse search via RRF increased Recall@5 from 73.1% to 98.3% (+25.2 percentage points) and MRR@10 from 0.3958 to 1.0000. Adding the cross-encoder neural reranker raised NDCG@5 to 0.9502.
 
-- Moving from Dense-only to Hybrid RRF jumps **Recall@5 from 73.1% to 98.3% (+25.2 percentage points)** and boosts **MRR@10 from 0.3958 to 1.0000**.
-- Adding Cross-Encoder Neural Reranking maximizes **NDCG@5 to 0.9502**, pushing the most relevant evidence chunks to rank 1.
-
-### Table 2: Generation & Hallucination Benchmark (`evals/reports/generation_benchmark.md`)
+### Table 2: Generation benchmark (`evals/reports/generation_benchmark.md`)
 
 | Category Archetype | Queries | Faithfulness | Answer Relevance | Correctness | Citation Precision | Abstention Accuracy |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -135,104 +132,91 @@ The platform was quantitatively benchmarked against a curated 28-query golden ev
 | **Unanswerable Adversarial** | 4 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 |
 | **Overall Macro Average** | **28** | **1.0000** | **0.8303** | **0.9396** | **1.0000** | **1.0000** |
 
-*Key Findings:*
-
-- **Zero Hallucinated Citations:** The 6-tier verifier ladder achieved **100% Citation Precision**, eliminating ghost citations.
-- **Perfect Abstention:** Adversarial unanswerable queries achieved **100% Abstention Accuracy**, correctly signaling lack of evidence without confabulating figures.
+The verifier ladder eliminated hallucinated citations, achieving 100% citation precision across all 28 queries. On unanswerable queries with no supporting evidence, the system abstained consistently (100% abstention accuracy).
 
 ---
 
-## 4. Caution: Dry-Run Reports vs. Live Benchmark Runs
+## 4. Evaluation modes
 
-The repository includes both an offline deterministic dry-run harness (used in CI/CD without API spend) and live execution scripts for testing against the 5-PDF SEC corpus:
+The repository includes both an offline dry-run suite for CI and live benchmark scripts for testing against the 5-document SEC corpus.
 
-- **Dry-Run Mode (CI Gate):**
+### Dry-run mode (CI)
 
-  ```bash
-  uv run python -m evals.run_retrieval_eval --dry-run --output /tmp/ci_ablation.md
-  ```
+```bash
+uv run python -m evals.run_retrieval_eval --dry-run --output /tmp/ci_ablation.md
+```
 
-  Runs mock vector and lexical retrievers against ground truth fixtures in seconds to verify pipeline algorithms, scoring logic, and regression floors.
+Runs mock retrievers against stored fixtures to test scoring logic and regression baselines without calling external model APIs.
 
-- **Live Benchmark Execution (Production Verification):**
+### Live benchmark execution
 
-  ```bash
-  # 1. Start containers and ingest the 5-document SEC corpus
-  docker compose up -d
-  uv run alembic upgrade head
-  uv run python -m scripts.ingest_corpus --manifest data/raw_corpus/manifest.json
+```bash
+# 1. Start containers and ingest the 5-document SEC corpus
+docker compose up -d
+uv run alembic upgrade head
+uv run python -m scripts.ingest_corpus --manifest data/raw_corpus/manifest.json
 
-  # 2. Run live retrieval ablation (connects to pgvector & ParadeDB BM25)
-  uv run python -m evals.run_retrieval_eval --output evals/reports/retrieval_ablation.md
+# 2. Run live retrieval ablation (connects to pgvector & ParadeDB BM25)
+uv run python -m evals.run_retrieval_eval --output evals/reports/retrieval_ablation.md
 
-  # 3. Run live LLM generation & hallucination evaluation
-  uv run python -m evals.run_generation_eval --output evals/reports/generation_benchmark.md
-  ```
+# 3. Run live LLM generation & hallucination evaluation
+uv run python -m evals.run_generation_eval --output evals/reports/generation_benchmark.md
+```
 
-  *Note:* Live evaluation requires valid LLM/Embedding API credentials configured in `.env`.
-
----
-
-## 5. Key Architectural Decision Records (ADRs)
-
-Detailed architectural justifications are preserved in [`docs/architecture/ROADMAP_DEVIATIONS.md`](docs/architecture/ROADMAP_DEVIATIONS.md):
-
-- **ADR-001: Cloud-First Models vs. Local ML Runtime Overhead**
-  *Decision:* Decoupled cloud provider architecture using Gemini / OpenAI APIs rather than in-container PyTorch models.
-  *Rationale:* Eliminates 3GB+ RAM bloat and GPU lock-in in container images while preserving modular provider interfaces for local models (Ollama/vLLM) if desired.
-- **ADR-002: ParadeDB `pg_search` for True Okapi BM25 Lexical Retrieval**
-  *Decision:* Deployed `paradedb/paradedb:latest` (Postgres 16 + pgvector + pg_search) over standard `tsvector`.
-  *Rationale:* Native Postgres `tsvector` lacks BM25 term frequency saturation and document length normalization (`k1` and `b`). ParadeDB provides Okapi BM25 in the same transactional PostgreSQL instance without Elasticsearch sidecars.
-- **ADR-003: Deterministic Quote Verification Ladder & Haystack Slicing**
-  *Decision:* Implemented a 6-tier deterministic repair ladder rather than trusting raw LLM citations.
-  *Rationale:* Treats LLM citations as candidate search queries. Verifies claims through exact match, punctuation-normalized match, fuzzy string similarity ($\ge 80\%$), cross-chunk re-homing, and haystack quote extraction.
-- **ADR-004: Parent-Child Full Sibling Lookup for Provenance**
-  *Decision:* Resolved child chunks to parents and loaded all sibling child chunk records.
-  *Rationale:* Guarantees exact bounding-box coordinates (`[x0, y0, x1, y1]`) and page numbers for all citations, even when the cited quote originated from an adjacent portion of the parent document.
-- **ADR-005: Normalized Reciprocal Rank Fusion (RRF)**
-  *Decision:* Normalized raw RRF scores by $\frac{w_{\text{dense}} + w_{\text{sparse}}}{k + 1}$ to scale cleanly into $[0.0, 1.0]$.
-  *Rationale:* Raw RRF produces squashed scores ($\sim 0.005 - 0.016$), which violates Pydantic confidence boundaries and skews downstream generator thresholding.
+*Note:* Live evaluation requires model API credentials in `.env`.
 
 ---
 
-## 6. Under-the-Hood Evidence Ledger UI (Farsi RTL)
+## 5. Architectural decisions
 
-The frontend is an **observability-first engineering workbench** built with **React 18, Vite, and Tailwind CSS**, featuring an Evidence Ledger aesthetic with full Persian (RTL) typography:
+Detailed justifications are documented in [`docs/architecture/ROADMAP_DEVIATIONS.md`](docs/architecture/ROADMAP_DEVIATIONS.md):
 
-- **Strict RTL Logical Properties:** Built with zero physical direction classes (`ms-*`, `me-*`, `ps-*`, `pe-*`, `start-*`, `end-*`), Vazirmatn typography, and `<bdi dir="ltr">` isolation for English technical terms.
-- **Interactive Citation & Chunk Inspector:** Clicking any inline citation chip `[1]` opens the Evidence Drawer, revealing bounding boxes, section hierarchy, similarity scores, and verification tier.
-- **Live Agent Execution Trace:** Step-by-step timeline of node executions (Intent Router, Safe Text-to-SQL, CRAG Grader, Cross-Encoder Reranker) with per-step millisecond latencies.
-- **5 Golden Presets & Pipeline Switches:** One-click presets demonstrating hybrid search, multi-hop reasoning, safe SQL analytics, multi-turn conversational memory, and prompt injection defense.
-- **Real-Time SSE Streaming:** Low-latency token streaming with streaming cache-hit indicators.
-
-The dashboard is mounted directly inside the FastAPI backend at `/dashboard/` when built.
+- **ADR-001 (Cloud APIs vs. in-container models):** Uses Gemini and OpenAI APIs instead of running local PyTorch models inside container images. This avoids 3GB+ image bloat and GPU dependencies, while keeping interfaces compatible with local runtimes (Ollama or vLLM).
+- **ADR-002 (ParadeDB for BM25):** Deploys `paradedb/paradedb:latest` (Postgres 16 with pgvector and pg_search) instead of standard PostgreSQL `tsvector`, providing Okapi BM25 term frequency saturation and document length normalization (`k1` and `b`) within the same database instance.
+- **ADR-003 (Deterministic verification ladder):** Validates generated citations through exact match, punctuation-normalized match, token fuzzy similarity ($\ge 80\%$), cross-chunk re-homing, and quote slicing.
+- **ADR-004 (Parent-child sibling lookup):** Resolves child chunks to parent documents and loads sibling records, providing exact bounding-box coordinates (`[x0, y0, x1, y1]`) and page numbers for citations even when quotes span adjacent child chunks.
+- **ADR-005 (Normalized Reciprocal Rank Fusion):** Normalizes RRF scores with $\frac{w_{\text{dense}} + w_{\text{sparse}}}{k + 1}$ to scale values into $[0.0, 1.0]$, preventing compressed scores from distorting downstream generation thresholds.
 
 ---
 
-## 7. High-Impact Resume Bullet Templates
+## 6. Frontend dashboard
 
-Engineers presenting this platform in technical interviews can adapt the following metrics-backed bullets:
+The web interface is built with React 18, Vite, and Tailwind CSS, with right-to-left Persian typography:
 
-- **Core Hybrid Retrieval & Provenance:**
+- Direction isolation: uses CSS logical properties (`ms-*`, `me-*`, `ps-*`, `pe-*`, `start-*`, `end-*`), Vazirmatn font, and `<bdi dir="ltr">` tags for technical terms.
+- Citation inspector: clicking an inline citation chip `[1]` opens an evidence drawer with PDF bounding boxes, section hierarchy, similarity scores, and verification tier.
+- Execution traces: shows execution steps across the intent router, safe text-to-SQL tool, CRAG grader, and reranker with latency measurements.
+- Presets: includes sample queries covering hybrid search, multi-hop reasoning, SQL analytics, conversation history, and prompt injection defense.
+- Real-time streaming: token streaming via server-sent events (SSE) with cache-hit indicators.
+
+When built, the dashboard is served by FastAPI at `/dashboard/`.
+
+---
+
+## 7. Portfolio summary templates
+
+Engineers presenting this project in portfolios or interviews can adapt the following descriptions:
+
+- **Hybrid retrieval and provenance:**
   > *"Architected a two-stage Hybrid RAG platform in Python (FastAPI, PostgreSQL pgvector, ParadeDB BM25) featuring Parent-Child hierarchical indexing, Reciprocal Rank Fusion (RRF), and Cross-Encoder neural reranking, improving retrieval **Recall@5 from 73.1% to 98.3% (+25.2 pp)** and **MRR@10 from 0.3958 to 1.0000** across a 28-query SEC 10-K financial benchmark."*
 
-- **Self-Correcting Agentic State Machine & Safe Text-to-SQL:**
+- **Agentic state machine and text-to-SQL:**
   > *"Engineered a self-correcting Agentic RAG state machine with dynamic intent routing, multi-hop query decomposition, Corrective RAG (CRAG) reflection grading, and an AST-sandboxed Text-to-SQL tool, achieving **100% Faithfulness**, **100% Citation Precision**, and **100% Adversarial Abstention Accuracy** with zero hallucinated figures."*
 
-- **Distributed Systems, Async Ingestion & Telemetry Workbench:**
+- **Asynchronous ingestion and telemetry:**
   > *"Built an asynchronous document ingestion pipeline using Celery and Redis alongside an invalidation-aware Redis vector semantic cache and rate limiter, cutting **P95 latency to < 10ms on cache hits**, and designed an RTL Evidence Ledger observability dashboard with real-time SSE streaming and execution tracing."*
 
 ---
 
-## 8. Quickstart & Deployment
+## 8. Quickstart
 
-### 1. Start Infrastructure Containers
+### 1. Start containers
 
 ```bash
 docker compose up -d
 ```
 
-### 2. Install Dependencies & Run Database Migrations
+### 2. Install dependencies and run migrations
 
 ```bash
 # Sync Python virtual environment
@@ -242,7 +226,7 @@ uv sync
 uv run alembic upgrade head
 ```
 
-### 3. Build Dashboard & Run Tests
+### 3. Build dashboard and run tests
 
 ```bash
 # Run backend test suite
@@ -256,13 +240,13 @@ npm run build
 cd ..
 ```
 
-### 4. Start the Application
+### 4. Start the application
 
 ```bash
 # Start FastAPI application
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-- **FastAPI API & OpenAPI Docs:** `http://localhost:8000/docs`
-- **Embedded Evidence Ledger Dashboard:** `http://localhost:8000/dashboard/`
-- **Vite Dev Server (Hot Reload):** `cd dashboard && npm run dev` (`http://localhost:5173/`)
+- API documentation: `http://localhost:8000/docs`
+- Embedded dashboard: `http://localhost:8000/dashboard/`
+- Vite development server: `cd dashboard && npm run dev` (`http://localhost:5173/`)
