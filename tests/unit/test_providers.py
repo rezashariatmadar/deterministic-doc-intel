@@ -3,6 +3,7 @@
 import pytest
 import respx
 
+from app.core.config import get_settings
 from app.core.exceptions import ConfigurationError
 from app.services.providers.base import EmbeddingProvider, LLMProvider
 from app.services.providers.cloud_provider import (
@@ -180,19 +181,20 @@ def test_local_embedding_provider_respects_settings_model() -> None:
 
 
 def test_factory_creates_gemini_providers() -> None:
+    settings = get_settings()
     embed = get_embedding_provider(
         provider_type="gemini",
         api_key="gemini-test-key",
         dimension=1024,
     )
-    assert embed.model_name == "gemini-embedding-001"
+    assert embed.model_name == settings.GEMINI_EMBEDDING_MODEL
     assert embed.dimension == 1024
 
     llm = get_llm_provider(
         provider_type="gemini",
         api_key="gemini-test-key",
     )
-    assert llm.model_name == "gemini-2.5-flash"
+    assert llm.model_name == settings.GEMINI_LLM_MODEL
 
 
 @pytest.mark.asyncio
